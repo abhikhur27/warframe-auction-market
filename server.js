@@ -232,6 +232,29 @@ function keepBestOffers(orders, direction = 'asc') {
   return sorted;
 }
 
+function quantile(values, q) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const pos = (sorted.length - 1) * q;
+  const base = Math.floor(pos);
+  const rest = pos - base;
+  if (sorted[base + 1] !== undefined) {
+    return sorted[base] + rest * (sorted[base + 1] - sorted[base]);
+  }
+  return sorted[base];
+}
+
+function getHighOutlierFence(values) {
+  if (!values.length) return Number.POSITIVE_INFINITY;
+  const q1 = quantile(values, 0.25);
+  const q3 = quantile(values, 0.75);
+  const iqr = Math.max(0, (q3 ?? 0) - (q1 ?? 0));
+  if (iqr === 0) {
+    return (q3 ?? values[0]) * 1.75 + 20;
+  }
+  return (q3 ?? values[0]) + 3 * iqr;
+}
+
 function makeWhisper(order, itemName, variantLabel, actionWord) {
   const target = order?.user?.ingameName || 'unknown';
   const amount = order?.platinum;
@@ -281,8 +304,12 @@ function analyzeSingleItem(item, orders, options) {
 
     if (sells.length === 0 || buys.length === 0) continue;
 
+    const buyPrices = buys.map((x) => x.platinum).filter((x) => Number.isFinite(x));
+    const highOutlierFence = getHighOutlierFence(buyPrices);
+
     const bestSell = sells[0];
     const candidateBuys = buys
+      .filter((buy) => buy.platinum <= highOutlierFence)
       .map((buy) => {
         const spread = buy.platinum - bestSell.platinum;
         const roiPct = bestSell.platinum > 0 ? (spread / bestSell.platinum) * 100 : 0;
@@ -323,7 +350,7 @@ function analyzeSingleItem(item, orders, options) {
         perTrade: bestSell.perTrade,
         updatedAt: bestSell.updatedAt,
         seller: bestSell.user,
-        whisper: makeWhisper(bestSell, item.name, variantLabel, 'wts'),
+        whisper: makeWhisper(bestSell, item.name, variantLabel, 'wtb'),
       },
       buyerOptions: candidateBuys.map((entry) => ({
         price: entry.order.platinum,
@@ -334,7 +361,7 @@ function analyzeSingleItem(item, orders, options) {
         expectedProfit: entry.expectedProfit,
         updatedAt: entry.order.updatedAt,
         buyer: entry.order.user,
-        whisper: makeWhisper(entry.order, item.name, variantLabel, 'wtb'),
+        whisper: makeWhisper(entry.order, item.name, variantLabel, 'wts'),
       })),
       sellerAlternatives: sells.slice(1, 1 + sellerOptionCount).map((sell) => ({
         price: sell.platinum,
@@ -342,7 +369,7 @@ function analyzeSingleItem(item, orders, options) {
         perTrade: sell.perTrade,
         updatedAt: sell.updatedAt,
         seller: sell.user,
-        whisper: makeWhisper(sell, item.name, variantLabel, 'wts'),
+        whisper: makeWhisper(sell, item.name, variantLabel, 'wtb'),
       })),
       liquidity: {
         buyOffers: buys.length,
