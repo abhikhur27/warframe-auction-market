@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Warframe Flip Finder</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <h1>Warframe Flip Finder</h1>
+        <p>Find WTS -> WTB spreads with backup buyers so failed whispers do not kill your run.</p>
+      </header>
+
+      <section class="panel">
+        <h2>Items</h2>
+        <label for="item-input">Add items (name or slug)</label>
+        <div class="inline-row">
+          <input id="item-input" type="text" placeholder="e.g. Revenant Prime Set" autocomplete="off" />
+          <button id="add-item" type="button">Add</button>
+        </div>
+        <div id="suggestions" class="suggestions"></div>
+
+        <label for="items-bulk">Or paste a list (comma/new line separated)</label>
+        <textarea id="items-bulk" rows="4" placeholder="revenant prime set&#10;arcane energize&#10;primed continuity"></textarea>
+
+        <div class="chips-header">
+          <span>Selected items</span>
+          <button id="clear-items" type="button" class="ghost">Clear</button>
+        </div>
+        <div id="item-chips" class="chips"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Filters</h2>
+        <div class="grid">
+          <label>Platform
+            <select id="platform">
+              <option value="pc" selected>PC</option>
+              <option value="ps4">PlayStation</option>
+              <option value="xbox">Xbox</option>
+              <option value="switch">Switch</option>
+            </select>
+          </label>
+          <label>Crossplay
+            <select id="crossplay">
+              <option value="true" selected>Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+          <label>Min spread (plat)
+            <input id="min-spread" type="number" min="0" value="8" />
+          </label>
+          <label>Min net profit (plat)
+            <input id="min-profit" type="number" min="0" value="8" />
+          </label>
+          <label>Min ROI (%)
+            <input id="min-roi" type="number" min="0" value="15" />
+          </label>
+          <label>Min user reputation
+            <input id="min-rep" type="number" min="0" value="3" />
+          </label>
+          <label>Max order age (hours)
+            <input id="max-age" type="number" min="0" value="48" />
+          </label>
+          <label>Buyer options per item
+            <input id="buyer-options" type="number" min="1" max="8" value="4" />
+          </label>
+          <label>Seller alternatives
+            <input id="seller-options" type="number" min="0" max="8" value="3" />
+          </label>
+          <label>Auto scan size
+            <input id="scan-limit" type="number" min="10" max="250" value="80" />
+          </label>
+          <label>Auto max results
+            <input id="max-results" type="number" min="1" max="100" value="25" />
+          </label>
+        </div>
+
+        <fieldset>
+          <legend>Allowed status</legend>
+          <label><input type="checkbox" name="status" value="ingame" checked /> In game</label>
+          <label><input type="checkbox" name="status" value="online" checked /> Online</label>
+          <label><input type="checkbox" name="status" value="offline" /> Offline</label>
+        </fieldset>
+
+        <div class="inline-row">
+          <button id="analyze" type="button" class="primary">Analyze Opportunities</button>
+          <button id="auto-find" type="button">Auto Find Items</button>
+          <span id="loading" class="muted"></span>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Results</h2>
+        <p id="summary" class="muted">Run an analysis to see opportunities.</p>
+        <div id="results" class="results"></div>
+      </section>
+    </main>
+
+    <template id="result-template">
+      <article class="result-card">
+        <header>
+          <h3 class="item-name"></h3>
+          <span class="badge variant"></span>
+        </header>
+        <div class="metrics"></div>
+        <div class="columns">
+          <section>
+            <h4>Buy From (WTS)</h4>
+            <div class="best-sell"></div>
+            <h5>Backup Sellers</h5>
+            <ul class="backup-sellers"></ul>
+          </section>
+          <section>
+            <h4>Sell To (WTB)</h4>
+            <ol class="buyer-options"></ol>
+          </section>
+        </div>
+      </article>
+    </template>
+
+    <script src="/app.js" defer></script>
+  </body>
+</html>

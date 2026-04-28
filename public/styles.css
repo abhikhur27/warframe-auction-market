@@ -1,0 +1,271 @@
+:root {
+  --bg: #0e1116;
+  --panel: #171b22;
+  --line: #2c3442;
+  --text: #e6e8ee;
+  --muted: #9ba7bb;
+  --accent: #20c997;
+  --danger: #ff7b72;
+  --chip: #202736;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  background: radial-gradient(circle at top right, #1c2330 0%, var(--bg) 45%);
+  color: var(--text);
+}
+
+.layout {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.2rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.hero p {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+}
+
+.panel {
+  background: linear-gradient(180deg, #1a1f29, var(--panel));
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+label,
+fieldset,
+legend,
+p,
+span,
+li {
+  font-size: 0.95rem;
+}
+
+input,
+textarea,
+select,
+button {
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #101520;
+  color: var(--text);
+  padding: 0.55rem 0.7rem;
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #3f4c63;
+}
+
+button.primary {
+  background: linear-gradient(135deg, #0ea88c, var(--accent));
+  color: #061018;
+  border: 0;
+  font-weight: 700;
+}
+
+button.ghost {
+  background: transparent;
+}
+
+.inline-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-row input {
+  flex: 1;
+  min-width: 260px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.7rem;
+}
+
+.grid label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+fieldset {
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  margin: 0.9rem 0;
+  padding: 0.7rem;
+}
+
+fieldset label {
+  margin-right: 1rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.suggestions {
+  margin-top: 0.5rem;
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.suggestion {
+  background: #1c2636;
+  border: 1px solid #32425a;
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+}
+
+.chips-header {
+  margin-top: 0.9rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chips {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.chip {
+  background: var(--chip);
+  border: 1px solid #36425c;
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.chip button {
+  padding: 0.05rem 0.3rem;
+  border-radius: 999px;
+}
+
+.results {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.result-card {
+  border: 1px solid #2f3a4f;
+  border-radius: 12px;
+  padding: 0.9rem;
+  background: #111723;
+}
+
+.result-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.result-card h3 {
+  margin: 0;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  border: 1px solid #3a4a64;
+  color: #b2c1d7;
+  padding: 0.2rem 0.55rem;
+}
+
+.metrics {
+  margin-top: 0.55rem;
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.metric {
+  border-radius: 8px;
+  padding: 0.25rem 0.55rem;
+  background: #1a2536;
+  border: 1px solid #2f4361;
+}
+
+.columns {
+  margin-top: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 0.9rem;
+}
+
+.best-sell,
+.buyer-row,
+.seller-row {
+  border: 1px solid #2d3a51;
+  border-radius: 8px;
+  padding: 0.55rem;
+  margin-bottom: 0.45rem;
+  background: #131c2b;
+}
+
+.price {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.secondary {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+ol,
+ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+code {
+  display: block;
+  margin-top: 0.3rem;
+  background: #0d131d;
+  border: 1px solid #273249;
+  border-radius: 6px;
+  padding: 0.35rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.85rem;
+}
+
+.error {
+  color: var(--danger);
+}
+
+@media (max-width: 650px) {
+  .inline-row input {
+    min-width: 100%;
+  }
+}

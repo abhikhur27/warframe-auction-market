@@ -1,0 +1,565 @@
+const express = require('express');
+const path = require('path');
+
+const API_BASE = 'https://api.warframe.market/v2';
+const DEFAULT_PLATFORM = 'pc';
+const DEFAULT_LANGUAGE = 'en';
+const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
+const REQUEST_DELAY_MS = 360;
+const MAX_CONCURRENT_REQUESTS = 3;
+
+const app = express();
+app.use(express.json({ limit: '1mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+const itemCache = {
+  loadedAt: 0,
+  items: [],
+  bySlug: new Map(),
+  byName: new Map(),
+  byId: new Map(),
+};
+
+const requestQueue = {
+  active: 0,
+  pending: [],
+};
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toBoolean(value, fallback = true) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') {
+    if (value.toLowerCase() === 'true') return true;
+    if (value.toLowerCase() === 'false') return false;
+  }
+  return fallback;
+}
+
+async function runLimited(task) {
+  if (requestQueue.active >= MAX_CONCURRENT_REQUESTS) {
+    await new Promise((resolve) => requestQueue.pending.push(resolve));
+  }
+
+  requestQueue.active += 1;
+  try {
+    return await task();
+  } finally {
+    requestQueue.active -= 1;
+    const next = requestQueue.pending.shift();
+    if (next) next();
+  }
+}
+
+async function apiGet(pathname, options = {}) {
+  const platform = options.platform || DEFAULT_PLATFORM;
+  const language = options.language || DEFAULT_LANGUAGE;
+  const crossplay = toBoolean(options.crossplay, true);
+
+  return runLimited(async () => {
+    await sleep(REQUEST_DELAY_MS);
+
+    const response = await fetch(`${API_BASE}${pathname}`, {
+      headers: {
+        platform,
+        language,
+        crossplay: String(crossplay),
+      },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      const err = new Error(`API ${response.status}: ${text.slice(0, 200)}`);
+      err.status = response.status;
+      throw err;
+    }
+
+    const body = await response.json();
+    return body.data;
+  });
+}
+
+function normalizeItem(raw) {
+  const name = raw?.i18n?.en?.name || raw.slug;
+  return {
+    id: raw.id,
+    slug: raw.slug,
+    name,
+    tags: Array.isArray(raw.tags) ? raw.tags : [],
+    maxRank: Number.isInteger(raw.maxRank) ? raw.maxRank : null,
+    subtypes: Array.isArray(raw.subtypes) ? raw.subtypes : [],
+  };
+}
+
+async function ensureItemsLoaded(force = false) {
+  const stale = Date.now() - itemCache.loadedAt > CACHE_TTL_MS;
+  if (!force && itemCache.items.length > 0 && !stale) {
+    return itemCache.items;
+  }
+
+  const rawItems = await apiGet('/items');
+  const items = rawItems.map(normalizeItem);
+  items.sort((a, b) => a.name.localeCompare(b.name));
+
+  const bySlug = new Map();
+  const byName = new Map();
+  const byId = new Map();
+
+  for (const item of items) {
+    bySlug.set(item.slug.toLowerCase(), item);
+    byName.set(item.name.toLowerCase(), item);
+    byId.set(item.id, item);
+  }
+
+  itemCache.items = items;
+  itemCache.bySlug = bySlug;
+  itemCache.byName = byName;
+  itemCache.byId = byId;
+  itemCache.loadedAt = Date.now();
+
+  return items;
+}
+
+function searchItems(query, limit = 12) {
+  const normalizedQuery = (query || '').trim().toLowerCase();
+  if (!normalizedQuery) return [];
+
+  const exact = [];
+  const startsWith = [];
+  const contains = [];
+
+  for (const item of itemCache.items) {
+    const slug = item.slug.toLowerCase();
+    const name = item.name.toLowerCase();
+
+    if (slug === normalizedQuery || name === normalizedQuery) {
+      exact.push(item);
+      continue;
+    }
+
+    if (slug.startsWith(normalizedQuery) || name.startsWith(normalizedQuery)) {
+      startsWith.push(item);
+      continue;
+    }
+
+    if (slug.includes(normalizedQuery) || name.includes(normalizedQuery)) {
+      contains.push(item);
+    }
+  }
+
+  return [...exact, ...startsWith, ...contains].slice(0, limit);
+}
+
+function resolveItems(identifiers) {
+  const resolved = [];
+  const unresolved = [];
+  const seen = new Set();
+
+  for (const raw of identifiers) {
+    const term = String(raw || '').trim();
+    if (!term) continue;
+
+    const lower = term.toLowerCase();
+    let match = itemCache.bySlug.get(lower) || itemCache.byName.get(lower);
+
+    if (!match) {
+      const fuzzy = searchItems(term, 1);
+      if (fuzzy.length === 1) {
+        match = fuzzy[0];
+      }
+    }
+
+    if (!match) {
+      unresolved.push(term);
+      continue;
+    }
+
+    if (seen.has(match.slug)) continue;
+    seen.add(match.slug);
+    resolved.push(match);
+  }
+
+  return { resolved, unresolved };
+}
+
+function isStatusAllowed(order, statusSet) {
+  const status = order?.user?.status || 'offline';
+  return statusSet.has(status);
+}
+
+function isFreshEnough(order, maxAgeHours) {
+  if (!Number.isFinite(maxAgeHours) || maxAgeHours <= 0) return true;
+  if (!order.updatedAt) return true;
+
+  const updatedAt = Date.parse(order.updatedAt);
+  if (Number.isNaN(updatedAt)) return true;
+
+  const ageMs = Date.now() - updatedAt;
+  return ageMs <= maxAgeHours * 60 * 60 * 1000;
+}
+
+function formatVariantKey(order) {
+  const rank = Number.isInteger(order.rank) ? order.rank : null;
+  const subtype = order.subtype || null;
+  return `${rank === null ? 'na' : rank}|${subtype || 'na'}`;
+}
+
+function formatVariantLabel(rank, subtype) {
+  const parts = [];
+  if (rank !== null && rank !== undefined) parts.push(`Rank ${rank}`);
+  if (subtype) parts.push(`Subtype ${subtype}`);
+  if (parts.length === 0) return 'Default';
+  return parts.join(' | ');
+}
+
+function keepBestOffers(orders, direction = 'asc') {
+  const sorted = [...orders].sort((a, b) => {
+    if (a.platinum !== b.platinum) {
+      return direction === 'asc' ? a.platinum - b.platinum : b.platinum - a.platinum;
+    }
+
+    const repA = a.user?.reputation || 0;
+    const repB = b.user?.reputation || 0;
+    if (repA !== repB) return repB - repA;
+
+    const timeA = Date.parse(a.updatedAt || '') || 0;
+    const timeB = Date.parse(b.updatedAt || '') || 0;
+    return timeB - timeA;
+  });
+
+  return sorted;
+}
+
+function makeWhisper(order, itemName, variantLabel, actionWord) {
+  const target = order?.user?.ingameName || 'unknown';
+  const amount = order?.platinum;
+  const flavor = variantLabel && variantLabel !== 'Default' ? ` (${variantLabel})` : '';
+  return `/w ${target} Hi! ${actionWord} ${itemName}${flavor} for ${amount}p.`;
+}
+
+function analyzeSingleItem(item, orders, options) {
+  const statusSet = new Set(options.statuses);
+  const minReputation = options.minReputation;
+  const minProfit = options.minProfit;
+  const minSpread = options.minSpread;
+  const minRoiPct = options.minRoiPct;
+  const buyerOptionCount = options.buyerOptionCount;
+  const sellerOptionCount = options.sellerOptionCount;
+  const maxAgeHours = options.maxAgeHours;
+
+  const grouped = new Map();
+
+  for (const order of orders) {
+    if (!order || !order.visible) continue;
+    if (!isStatusAllowed(order, statusSet)) continue;
+    if (!isFreshEnough(order, maxAgeHours)) continue;
+
+    const reputation = order.user?.reputation || 0;
+    if (reputation < minReputation) continue;
+
+    const key = formatVariantKey(order);
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        rank: Number.isInteger(order.rank) ? order.rank : null,
+        subtype: order.subtype || null,
+        sells: [],
+        buys: [],
+      });
+    }
+
+    if (order.type === 'sell') grouped.get(key).sells.push(order);
+    if (order.type === 'buy') grouped.get(key).buys.push(order);
+  }
+
+  let best = null;
+
+  for (const group of grouped.values()) {
+    const sells = keepBestOffers(group.sells, 'asc');
+    const buys = keepBestOffers(group.buys, 'desc');
+
+    if (sells.length === 0 || buys.length === 0) continue;
+
+    const bestSell = sells[0];
+    const candidateBuys = buys
+      .map((buy) => {
+        const spread = buy.platinum - bestSell.platinum;
+        const roiPct = bestSell.platinum > 0 ? (spread / bestSell.platinum) * 100 : 0;
+        const quantity = Math.min(buy.quantity || 1, bestSell.quantity || 1);
+        return {
+          order: buy,
+          spread,
+          roiPct,
+          quantity,
+          expectedProfit: spread * Math.max(quantity, 1),
+        };
+      })
+      .filter((entry) => entry.spread >= minSpread && entry.spread >= minProfit && entry.roiPct >= minRoiPct)
+      .slice(0, buyerOptionCount);
+
+    if (candidateBuys.length === 0) continue;
+
+    const top = candidateBuys[0];
+    const variantLabel = formatVariantLabel(group.rank, group.subtype);
+
+    const offer = {
+      item: {
+        slug: item.slug,
+        name: item.name,
+      },
+      variant: {
+        rank: group.rank,
+        subtype: group.subtype,
+        label: variantLabel,
+      },
+      spread: top.spread,
+      roiPct: Number(top.roiPct.toFixed(1)),
+      expectedProfit: top.expectedProfit,
+      recommendedQuantity: top.quantity,
+      bestSell: {
+        price: bestSell.platinum,
+        quantity: bestSell.quantity,
+        perTrade: bestSell.perTrade,
+        updatedAt: bestSell.updatedAt,
+        seller: bestSell.user,
+        whisper: makeWhisper(bestSell, item.name, variantLabel, 'wts'),
+      },
+      buyerOptions: candidateBuys.map((entry) => ({
+        price: entry.order.platinum,
+        quantity: entry.order.quantity,
+        perTrade: entry.order.perTrade,
+        spread: entry.spread,
+        roiPct: Number(entry.roiPct.toFixed(1)),
+        expectedProfit: entry.expectedProfit,
+        updatedAt: entry.order.updatedAt,
+        buyer: entry.order.user,
+        whisper: makeWhisper(entry.order, item.name, variantLabel, 'wtb'),
+      })),
+      sellerAlternatives: sells.slice(1, 1 + sellerOptionCount).map((sell) => ({
+        price: sell.platinum,
+        quantity: sell.quantity,
+        perTrade: sell.perTrade,
+        updatedAt: sell.updatedAt,
+        seller: sell.user,
+        whisper: makeWhisper(sell, item.name, variantLabel, 'wts'),
+      })),
+      liquidity: {
+        buyOffers: buys.length,
+        sellOffers: sells.length,
+      },
+    };
+
+    if (!best || offer.expectedProfit > best.expectedProfit) {
+      best = offer;
+    }
+  }
+
+  return best;
+}
+
+function parseAnalysisOptions(body = {}) {
+  return {
+    platform: String(body.platform || DEFAULT_PLATFORM).toLowerCase(),
+    language: String(body.language || DEFAULT_LANGUAGE).toLowerCase(),
+    crossplay: toBoolean(body.crossplay, true),
+    statuses: Array.isArray(body.statuses) && body.statuses.length > 0
+      ? body.statuses.map((x) => String(x).toLowerCase())
+      : ['ingame', 'online'],
+    minReputation: Number.isFinite(Number(body.minReputation)) ? Number(body.minReputation) : 0,
+    minProfit: Number.isFinite(Number(body.minProfit)) ? Number(body.minProfit) : 6,
+    minSpread: Number.isFinite(Number(body.minSpread)) ? Number(body.minSpread) : 6,
+    minRoiPct: Number.isFinite(Number(body.minRoiPct)) ? Number(body.minRoiPct) : 10,
+    buyerOptionCount: Number.isFinite(Number(body.buyerOptionCount)) ? Math.min(Math.max(Number(body.buyerOptionCount), 1), 8) : 4,
+    sellerOptionCount: Number.isFinite(Number(body.sellerOptionCount)) ? Math.min(Math.max(Number(body.sellerOptionCount), 0), 8) : 3,
+    maxAgeHours: Number.isFinite(Number(body.maxAgeHours)) ? Math.max(Number(body.maxAgeHours), 0) : 48,
+  };
+}
+
+async function analyzeResolvedItems(resolved, options) {
+  const result = [];
+  const errors = [];
+
+  for (const item of resolved) {
+    try {
+      const orders = await apiGet(`/orders/item/${encodeURIComponent(item.slug)}`, {
+        platform: options.platform,
+        language: options.language,
+        crossplay: options.crossplay,
+      });
+
+      const analyzed = analyzeSingleItem(item, Array.isArray(orders) ? orders : [], options);
+      if (analyzed) result.push(analyzed);
+    } catch (error) {
+      errors.push({ item: item.slug, error: error.message || 'Unknown error' });
+    }
+  }
+
+  result.sort((a, b) => b.expectedProfit - a.expectedProfit);
+  return { result, errors };
+}
+
+function getRecentCandidateItems(recentOrders, options) {
+  const statusSet = new Set(options.statuses);
+  const minReputation = options.minReputation;
+  const maxAgeHours = options.maxAgeHours;
+
+  const statsByItem = new Map();
+
+  for (const order of recentOrders) {
+    if (!order || !order.itemId || !order.visible) continue;
+    if (!isStatusAllowed(order, statusSet)) continue;
+    if (!isFreshEnough(order, maxAgeHours)) continue;
+    if ((order.user?.reputation || 0) < minReputation) continue;
+
+    if (!statsByItem.has(order.itemId)) {
+      statsByItem.set(order.itemId, {
+        itemId: order.itemId,
+        recentCount: 0,
+        sellCount: 0,
+        buyCount: 0,
+        minSell: Number.POSITIVE_INFINITY,
+        maxBuy: Number.NEGATIVE_INFINITY,
+      });
+    }
+
+    const stat = statsByItem.get(order.itemId);
+    stat.recentCount += 1;
+
+    if (order.type === 'sell') {
+      stat.sellCount += 1;
+      stat.minSell = Math.min(stat.minSell, order.platinum);
+    } else if (order.type === 'buy') {
+      stat.buyCount += 1;
+      stat.maxBuy = Math.max(stat.maxBuy, order.platinum);
+    }
+  }
+
+  const prioritized = [];
+  const fallback = [];
+
+  for (const stat of statsByItem.values()) {
+    const item = itemCache.byId.get(stat.itemId);
+    if (!item) continue;
+
+    const spreadHint = Number.isFinite(stat.maxBuy) && Number.isFinite(stat.minSell)
+      ? stat.maxBuy - stat.minSell
+      : Number.NEGATIVE_INFINITY;
+    const activeTwoSided = stat.sellCount > 0 && stat.buyCount > 0;
+    const candidate = {
+      item,
+      recentCount: stat.recentCount,
+      sellCount: stat.sellCount,
+      buyCount: stat.buyCount,
+      spreadHint,
+      activeTwoSided,
+    };
+
+    if (activeTwoSided) prioritized.push(candidate);
+    else fallback.push(candidate);
+  }
+
+  prioritized.sort((a, b) => {
+    if (a.spreadHint !== b.spreadHint) return b.spreadHint - a.spreadHint;
+    return b.recentCount - a.recentCount;
+  });
+
+  fallback.sort((a, b) => b.recentCount - a.recentCount);
+
+  return [...prioritized, ...fallback];
+}
+
+app.get('/api/health', async (_req, res) => {
+  res.json({ ok: true, now: new Date().toISOString() });
+});
+
+app.get('/api/items', async (req, res) => {
+  try {
+    await ensureItemsLoaded();
+    const q = String(req.query.q || '').trim();
+    if (!q) {
+      return res.json({ items: itemCache.items.slice(0, 20) });
+    }
+
+    const limit = Number(req.query.limit || 12);
+    const items = searchItems(q, Math.max(1, Math.min(limit, 30)));
+    return res.json({ items });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Failed to load items' });
+  }
+});
+
+app.post('/api/analyze', async (req, res) => {
+  try {
+    await ensureItemsLoaded();
+
+    const body = req.body || {};
+    const rawItems = Array.isArray(body.items) ? body.items : [];
+
+    if (rawItems.length === 0) {
+      return res.status(400).json({ error: 'Please provide at least one item name or slug.' });
+    }
+
+    const { resolved, unresolved } = resolveItems(rawItems);
+    if (resolved.length === 0) {
+      return res.status(400).json({ error: 'No valid items were found.', unresolved });
+    }
+
+    const options = parseAnalysisOptions(body);
+    const { result, errors } = await analyzeResolvedItems(resolved, options);
+
+    return res.json({
+      analyzedAt: new Date().toISOString(),
+      options,
+      requestedCount: rawItems.length,
+      resolvedCount: resolved.length,
+      unresolved,
+      result,
+      errors,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Unknown server error' });
+  }
+});
+
+app.post('/api/auto-find', async (req, res) => {
+  try {
+    await ensureItemsLoaded();
+
+    const body = req.body || {};
+    const options = parseAnalysisOptions(body);
+    const scanLimit = Number.isFinite(Number(body.scanLimit))
+      ? Math.min(Math.max(Number(body.scanLimit), 10), 250)
+      : 80;
+    const maxResults = Number.isFinite(Number(body.maxResults))
+      ? Math.min(Math.max(Number(body.maxResults), 1), 100)
+      : 25;
+
+    const recentOrders = await apiGet('/orders/recent', {
+      platform: options.platform,
+      language: options.language,
+      crossplay: options.crossplay,
+    });
+
+    const candidates = getRecentCandidateItems(Array.isArray(recentOrders) ? recentOrders : [], options);
+    const selected = candidates.slice(0, scanLimit).map((x) => x.item);
+    const { result, errors } = await analyzeResolvedItems(selected, options);
+
+    return res.json({
+      analyzedAt: new Date().toISOString(),
+      options,
+      scanLimit,
+      scannedCount: selected.length,
+      candidateCount: candidates.length,
+      result: result.slice(0, maxResults),
+      errors,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Unknown server error' });
+  }
+});
+
+const port = Number(process.env.PORT || 3000);
+app.listen(port, () => {
+  console.log(`Warframe arbitrage app running at http://localhost:${port}`);
+});
