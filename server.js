@@ -265,7 +265,6 @@ function makeWhisper(order, itemName, variantLabel, actionWord) {
 function analyzeSingleItem(item, orders, options) {
   const statusSet = new Set(options.statuses);
   const minReputation = options.minReputation;
-  const minProfit = options.minProfit;
   const minSpread = options.minSpread;
   const minRoiPct = options.minRoiPct;
   const buyerOptionCount = options.buyerOptionCount;
@@ -322,7 +321,7 @@ function analyzeSingleItem(item, orders, options) {
           expectedProfit: spread * Math.max(quantity, 1),
         };
       })
-      .filter((entry) => entry.spread >= minSpread && entry.spread >= minProfit && entry.roiPct >= minRoiPct)
+      .filter((entry) => entry.spread >= minSpread && entry.roiPct >= minRoiPct)
       .slice(0, buyerOptionCount);
 
     if (candidateBuys.length === 0) continue;
@@ -394,7 +393,6 @@ function parseAnalysisOptions(body = {}) {
       ? body.statuses.map((x) => String(x).toLowerCase())
       : ['ingame', 'online'],
     minReputation: Number.isFinite(Number(body.minReputation)) ? Number(body.minReputation) : 0,
-    minProfit: Number.isFinite(Number(body.minProfit)) ? Number(body.minProfit) : 6,
     minSpread: Number.isFinite(Number(body.minSpread)) ? Number(body.minSpread) : 6,
     minRoiPct: Number.isFinite(Number(body.minRoiPct)) ? Number(body.minRoiPct) : 10,
     buyerOptionCount: Number.isFinite(Number(body.buyerOptionCount)) ? Math.min(Math.max(Number(body.buyerOptionCount), 1), 8) : 4,
@@ -404,22 +402,26 @@ function parseAnalysisOptions(body = {}) {
 }
 
 async function analyzeResolvedItems(resolved, options) {
-  const result = [];
-  const errors = [];
-
-  for (const item of resolved) {
+  const tasks = resolved.map(async (item) => {
     try {
       const orders = await apiGet(`/orders/item/${encodeURIComponent(item.slug)}`, {
         platform: options.platform,
         language: options.language,
         crossplay: options.crossplay,
       });
-
       const analyzed = analyzeSingleItem(item, Array.isArray(orders) ? orders : [], options);
-      if (analyzed) result.push(analyzed);
+      return { analyzed, error: null };
     } catch (error) {
-      errors.push({ item: item.slug, error: error.message || 'Unknown error' });
+      return { analyzed: null, error: { item: item.slug, error: error.message || 'Unknown error' } };
     }
+  });
+
+  const settled = await Promise.all(tasks);
+  const result = [];
+  const errors = [];
+  for (const entry of settled) {
+    if (entry.analyzed) result.push(entry.analyzed);
+    if (entry.error) errors.push(entry.error);
   }
 
   result.sort((a, b) => b.expectedProfit - a.expectedProfit);
@@ -555,9 +557,6 @@ app.post('/api/auto-find', async (req, res) => {
 
     const body = req.body || {};
     const options = parseAnalysisOptions(body);
-    const scanLimit = Number.isFinite(Number(body.scanLimit))
-      ? Math.min(Math.max(Number(body.scanLimit), 10), 250)
-      : 80;
     const maxResults = Number.isFinite(Number(body.maxResults))
       ? Math.min(Math.max(Number(body.maxResults), 1), 100)
       : 25;
@@ -569,13 +568,12 @@ app.post('/api/auto-find', async (req, res) => {
     });
 
     const candidates = getRecentCandidateItems(Array.isArray(recentOrders) ? recentOrders : [], options);
-    const selected = candidates.slice(0, scanLimit).map((x) => x.item);
+    const selected = candidates.map((x) => x.item);
     const { result, errors } = await analyzeResolvedItems(selected, options);
 
     return res.json({
       analyzedAt: new Date().toISOString(),
       options,
-      scanLimit,
       scannedCount: selected.length,
       candidateCount: candidates.length,
       result: result.slice(0, maxResults),

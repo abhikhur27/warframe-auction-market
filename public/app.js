@@ -218,7 +218,6 @@ function buildCommonPayload() {
     crossplay: document.getElementById('crossplay').value,
     statuses: getStatuses(),
     minSpread: Number(document.getElementById('min-spread').value),
-    minProfit: Number(document.getElementById('min-profit').value),
     minRoiPct: Number(document.getElementById('min-roi').value),
     minReputation: Number(document.getElementById('min-rep').value),
     maxAgeHours: Number(document.getElementById('max-age').value),
@@ -299,7 +298,6 @@ async function autoFind() {
 
   const payload = {
     ...buildCommonPayload(),
-    scanLimit: Number(document.getElementById('scan-limit').value),
     maxResults: Number(document.getElementById('max-results').value),
   };
   await runAnalysisRequest('/api/auto-find', payload, 'Auto scanning active market items...');
