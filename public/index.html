@@ -88,7 +88,14 @@
 
       <section class="panel">
         <h2>Results</h2>
-        <p id="summary" class="muted">Run an analysis to see opportunities.</p>
+        <div class="results-head">
+          <p id="summary" class="muted">Run an analysis to see opportunities.</p>
+          <div class="inline-row">
+            <button id="copy-opportunities" type="button" class="ghost">Copy Brief</button>
+            <button id="export-results-json" type="button" class="ghost">Export JSON</button>
+            <button id="export-results-csv" type="button" class="ghost">Export CSV</button>
+          </div>
+        </div>
         <div id="results" class="results"></div>
       </section>
     </main>

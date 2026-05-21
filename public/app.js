@@ -14,7 +14,11 @@ const autoFindButton = document.getElementById('auto-find');
 const loadingEl = document.getElementById('loading');
 const summaryEl = document.getElementById('summary');
 const resultsEl = document.getElementById('results');
+const copyOpportunitiesButton = document.getElementById('copy-opportunities');
+const exportResultsJsonButton = document.getElementById('export-results-json');
+const exportResultsCsvButton = document.getElementById('export-results-csv');
 const template = document.getElementById('result-template');
+let lastResultsPayload = null;
 
 function normalizeName(value) {
   return String(value || '').trim();
@@ -136,6 +140,7 @@ function offerWhisper(offer) {
 }
 
 function renderResults(payload) {
+  lastResultsPayload = payload;
   resultsEl.innerHTML = '';
   const rows = payload.result || [];
 
@@ -212,6 +217,21 @@ function renderResults(payload) {
   }
 }
 
+function buildOpportunityBrief() {
+  const rows = lastResultsPayload?.result || [];
+  if (!rows.length) {
+    return 'No opportunities available.';
+  }
+
+  const header = summaryEl.textContent || `Found ${rows.length} opportunities.`;
+  const lines = rows.slice(0, 5).map((row, index) => {
+    const topBuyer = row.buyerOptions?.[0];
+    return `${index + 1}. ${row.item.name} ${row.variant.label} | buy ${row.bestSell.price}p | sell ${topBuyer?.price ?? '?'}p | spread ${row.spread}p | ROI ${row.roiPct}% | qty ${row.recommendedQuantity}`;
+  });
+
+  return ['Warframe Opportunity Brief', header, ...lines].join('\n');
+}
+
 function buildCommonPayload() {
   return {
     platform: document.getElementById('platform').value,
@@ -226,12 +246,24 @@ function buildCommonPayload() {
   };
 }
 
+function downloadBlob(name, body, type) {
+  const blob = new Blob([body], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = name;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 async function runAnalysisRequest(url, payload, startMessage) {
   try {
     setLoading('Running...');
     setSummary(startMessage, false);
     analyzeButton.disabled = true;
     autoFindButton.disabled = true;
+    copyOpportunitiesButton.disabled = true;
+    lastResultsPayload = null;
 
     const resp = await fetch(url, {
       method: 'POST',
@@ -259,6 +291,9 @@ async function runAnalysisRequest(url, payload, startMessage) {
   } finally {
     analyzeButton.disabled = false;
     autoFindButton.disabled = false;
+    copyOpportunitiesButton.disabled = !(lastResultsPayload?.result || []).length;
+    exportResultsJsonButton.disabled = !(lastResultsPayload?.result || []).length;
+    exportResultsCsvButton.disabled = !(lastResultsPayload?.result || []).length;
     setLoading('');
   }
 }
@@ -340,6 +375,56 @@ itemInput.addEventListener('input', () => {
 
 analyzeButton.addEventListener('click', analyze);
 autoFindButton.addEventListener('click', autoFind);
+copyOpportunitiesButton.addEventListener('click', async () => {
+  const brief = buildOpportunityBrief();
+  if (brief === 'No opportunities available.') {
+    setSummary('Run an analysis first so there is something useful to copy.', true);
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(brief);
+    setSummary('Copied a top-opportunity brief for quick whisper routing.', false);
+  } catch (_err) {
+    setSummary('Clipboard copy failed in this environment.', true);
+  }
+});
+exportResultsJsonButton.addEventListener('click', () => {
+  if (!(lastResultsPayload?.result || []).length) {
+    setSummary('Run an analysis first so there is something useful to export.', true);
+    return;
+  }
+
+  downloadBlob('warframe-flip-results.json', JSON.stringify(lastResultsPayload, null, 2), 'application/json');
+  setSummary('Exported the current opportunity set as JSON.', false);
+});
+exportResultsCsvButton.addEventListener('click', () => {
+  const rows = lastResultsPayload?.result || [];
+  if (!rows.length) {
+    setSummary('Run an analysis first so there is something useful to export.', true);
+    return;
+  }
+
+  const csvRows = ['item,variant,spread,roi_pct,expected_profit,recommended_quantity,best_sell,best_buy'];
+  rows.forEach((row) => {
+    csvRows.push([
+      `"${row.item.name}"`,
+      `"${row.variant.label}"`,
+      row.spread,
+      row.roiPct,
+      row.expectedProfit,
+      row.recommendedQuantity,
+      row.bestSell.price,
+      row.buyerOptions?.[0]?.price ?? '',
+    ].join(','));
+  });
+
+  downloadBlob('warframe-flip-results.csv', csvRows.join('\n'), 'text/csv');
+  setSummary('Exported the current opportunity set as CSV.', false);
+});
+copyOpportunitiesButton.disabled = true;
+exportResultsJsonButton.disabled = true;
+exportResultsCsvButton.disabled = true;
 
 (function preloadWatchlist() {
   [

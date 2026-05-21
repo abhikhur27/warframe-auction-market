@@ -10,7 +10,9 @@ This project is designed for **decision support** during manual trading, not ful
 - Finds multiple high-quality `WTB` buyers as fallback options.
 - Scores opportunities by spread, ROI, and expected profit.
 - Auto-find mode scans active market traffic and ranks candidates.
+- Current result sets can be exported as JSON or CSV after a scan.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
+- Copies a top-opportunity brief for faster whisper routing outside the app.
 
 ## Stack
 
