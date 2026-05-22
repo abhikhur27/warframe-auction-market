@@ -11,6 +11,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Scores opportunities by spread, ROI, and expected profit.
 - Auto-find mode scans active market traffic and ranks candidates.
 - Current result sets can be exported as JSON or CSV after a scan.
+- Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
 

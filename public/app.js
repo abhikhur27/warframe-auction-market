@@ -11,6 +11,7 @@ const chipsEl = document.getElementById('item-chips');
 const suggestionsEl = document.getElementById('suggestions');
 const analyzeButton = document.getElementById('analyze');
 const autoFindButton = document.getElementById('auto-find');
+const copyShareLinkButton = document.getElementById('copy-share-link');
 const loadingEl = document.getElementById('loading');
 const summaryEl = document.getElementById('summary');
 const resultsEl = document.getElementById('results');
@@ -33,11 +34,13 @@ function addItem(name) {
 
   state.selectedItems.push(normalized);
   renderChips();
+  syncUrlState();
 }
 
 function removeItem(name) {
   state.selectedItems = state.selectedItems.filter((item) => item !== name);
   renderChips();
+  syncUrlState();
 }
 
 function renderChips() {
@@ -103,6 +106,95 @@ function setLoading(message) {
 function setSummary(text, isError = false) {
   summaryEl.textContent = text;
   summaryEl.classList.toggle('error', Boolean(isError));
+}
+
+function readFormState() {
+  return {
+    items: state.selectedItems,
+    platform: document.getElementById('platform').value,
+    crossplay: document.getElementById('crossplay').value,
+    minSpread: document.getElementById('min-spread').value,
+    minRoi: document.getElementById('min-roi').value,
+    minRep: document.getElementById('min-rep').value,
+    maxAge: document.getElementById('max-age').value,
+    buyerOptions: document.getElementById('buyer-options').value,
+    sellerOptions: document.getElementById('seller-options').value,
+    maxResults: document.getElementById('max-results').value,
+    statuses: getStatuses(),
+  };
+}
+
+function syncUrlState() {
+  const params = new URLSearchParams();
+  const formState = readFormState();
+
+  if (formState.items.length) params.set('items', formState.items.join('\n'));
+  params.set('platform', formState.platform);
+  params.set('crossplay', formState.crossplay);
+  params.set('minSpread', formState.minSpread);
+  params.set('minRoi', formState.minRoi);
+  params.set('minRep', formState.minRep);
+  params.set('maxAge', formState.maxAge);
+  params.set('buyerOptions', formState.buyerOptions);
+  params.set('sellerOptions', formState.sellerOptions);
+  params.set('maxResults', formState.maxResults);
+  if (formState.statuses.length) params.set('statuses', formState.statuses.join(','));
+
+  window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
+}
+
+function hydrateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const fieldMap = [
+    ['platform', 'platform'],
+    ['crossplay', 'crossplay'],
+    ['minSpread', 'min-spread'],
+    ['minRoi', 'min-roi'],
+    ['minRep', 'min-rep'],
+    ['maxAge', 'max-age'],
+    ['buyerOptions', 'buyer-options'],
+    ['sellerOptions', 'seller-options'],
+    ['maxResults', 'max-results'],
+  ];
+
+  fieldMap.forEach(([paramName, elementId]) => {
+    const value = params.get(paramName);
+    const element = document.getElementById(elementId);
+    if (value && element) {
+      element.value = value;
+    }
+  });
+
+  const statuses = (params.get('statuses') || '').split(',').filter(Boolean);
+  if (statuses.length) {
+    document.querySelectorAll('input[name="status"]').forEach((checkbox) => {
+      checkbox.checked = statuses.includes(checkbox.value);
+    });
+  }
+
+  const items = (params.get('items') || '')
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (items.length) {
+    state.selectedItems = [];
+    items.forEach((item) => {
+      const exists = state.selectedItems.some((existing) => existing.toLowerCase() === item.toLowerCase());
+      if (!exists) {
+        state.selectedItems.push(item);
+      }
+    });
+  }
+}
+
+async function copyShareLink() {
+  syncUrlState();
+  try {
+    await navigator.clipboard.writeText(window.location.href);
+    setSummary('Copied the current scanner setup link.', false);
+  } catch (_err) {
+    setSummary('Clipboard copy failed for the scanner setup link.', true);
+  }
 }
 
 function metric(label, value) {
@@ -350,6 +442,7 @@ addItemButton.addEventListener('click', () => {
 clearItemsButton.addEventListener('click', () => {
   state.selectedItems = [];
   renderChips();
+  syncUrlState();
 });
 
 itemInput.addEventListener('keydown', (event) => {
@@ -375,6 +468,7 @@ itemInput.addEventListener('input', () => {
 
 analyzeButton.addEventListener('click', analyze);
 autoFindButton.addEventListener('click', autoFind);
+copyShareLinkButton.addEventListener('click', copyShareLink);
 copyOpportunitiesButton.addEventListener('click', async () => {
   const brief = buildOpportunityBrief();
   if (brief === 'No opportunities available.') {
@@ -426,7 +520,14 @@ copyOpportunitiesButton.disabled = true;
 exportResultsJsonButton.disabled = true;
 exportResultsCsvButton.disabled = true;
 
-(function preloadWatchlist() {
+document
+  .querySelectorAll('select, input[type="number"], input[name="status"]')
+  .forEach((element) => element.addEventListener('change', syncUrlState));
+
+hydrateFromUrl();
+if (state.selectedItems.length) {
+  renderChips();
+} else {
   [
     'arcane energize',
     'primed continuity',
@@ -435,4 +536,5 @@ exportResultsCsvButton.disabled = true;
     'adaptation',
     'axi g6 relic'
   ].forEach(addItem);
-})();
+}
+syncUrlState();
