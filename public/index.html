@@ -91,6 +91,14 @@
         <h2>Results</h2>
         <div class="results-head">
           <p id="summary" class="muted">Run an analysis to see opportunities.</p>
+          <label class="sort-label">Sort results
+            <select id="result-sort">
+              <option value="expected" selected>Expected profit</option>
+              <option value="roi">ROI</option>
+              <option value="spread">Spread</option>
+              <option value="liquidity">Liquidity</option>
+            </select>
+          </label>
           <div class="inline-row">
             <button id="copy-opportunities" type="button" class="ghost">Copy Brief</button>
             <button id="export-results-json" type="button" class="ghost">Export JSON</button>

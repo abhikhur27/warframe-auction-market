@@ -18,6 +18,7 @@ const resultsEl = document.getElementById('results');
 const copyOpportunitiesButton = document.getElementById('copy-opportunities');
 const exportResultsJsonButton = document.getElementById('export-results-json');
 const exportResultsCsvButton = document.getElementById('export-results-csv');
+const resultSortSelect = document.getElementById('result-sort');
 const template = document.getElementById('result-template');
 let lastResultsPayload = null;
 
@@ -120,6 +121,7 @@ function readFormState() {
     buyerOptions: document.getElementById('buyer-options').value,
     sellerOptions: document.getElementById('seller-options').value,
     maxResults: document.getElementById('max-results').value,
+    resultSort: resultSortSelect.value,
     statuses: getStatuses(),
   };
 }
@@ -138,6 +140,7 @@ function syncUrlState() {
   params.set('buyerOptions', formState.buyerOptions);
   params.set('sellerOptions', formState.sellerOptions);
   params.set('maxResults', formState.maxResults);
+  params.set('resultSort', formState.resultSort);
   if (formState.statuses.length) params.set('statuses', formState.statuses.join(','));
 
   window.history.replaceState({}, '', `${window.location.pathname}?${params.toString()}`);
@@ -164,6 +167,11 @@ function hydrateFromUrl() {
       element.value = value;
     }
   });
+
+  const requestedSort = params.get('resultSort');
+  if (requestedSort && resultSortSelect.querySelector(`option[value="${requestedSort}"]`)) {
+    resultSortSelect.value = requestedSort;
+  }
 
   const statuses = (params.get('statuses') || '').split(',').filter(Boolean);
   if (statuses.length) {
@@ -234,7 +242,7 @@ function offerWhisper(offer) {
 function renderResults(payload) {
   lastResultsPayload = payload;
   resultsEl.innerHTML = '';
-  const rows = payload.result || [];
+  const rows = sortResultRows(payload.result || []);
 
   if (rows.length === 0) {
     setSummary('No opportunities passed your filters. Lower thresholds or include more items.', false);
@@ -390,6 +398,28 @@ async function runAnalysisRequest(url, payload, startMessage) {
   }
 }
 
+function sortResultRows(rows) {
+  const mode = resultSortSelect.value;
+  const sorted = [...rows];
+
+  sorted.sort((a, b) => {
+    if (mode === 'roi') {
+      return b.roiPct - a.roiPct || b.expectedProfit - a.expectedProfit;
+    }
+    if (mode === 'spread') {
+      return b.spread - a.spread || b.expectedProfit - a.expectedProfit;
+    }
+    if (mode === 'liquidity') {
+      const liquidityA = (a.liquidity?.buyOffers || 0) + (a.liquidity?.sellOffers || 0);
+      const liquidityB = (b.liquidity?.buyOffers || 0) + (b.liquidity?.sellOffers || 0);
+      return liquidityB - liquidityA || b.expectedProfit - a.expectedProfit;
+    }
+    return b.expectedProfit - a.expectedProfit || b.roiPct - a.roiPct;
+  });
+
+  return sorted;
+}
+
 async function analyze() {
   const bulkTokens = bulkItemsInput.value
     .split(/[\n,]+/)
@@ -519,6 +549,13 @@ exportResultsCsvButton.addEventListener('click', () => {
 copyOpportunitiesButton.disabled = true;
 exportResultsJsonButton.disabled = true;
 exportResultsCsvButton.disabled = true;
+resultSortSelect.addEventListener('change', () => {
+  syncUrlState();
+  if (lastResultsPayload) {
+    renderResults(lastResultsPayload);
+    setSummary(`Resorted ${lastResultsPayload.result.length} opportunities by ${resultSortSelect.options[resultSortSelect.selectedIndex].text.toLowerCase()}.`, false);
+  }
+});
 
 document
   .querySelectorAll('select, input[type="number"], input[name="status"]')

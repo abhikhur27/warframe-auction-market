@@ -183,6 +183,12 @@ fieldset label {
   flex-wrap: wrap;
 }
 
+.sort-label {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 180px;
+}
+
 .result-card {
   border: 1px solid #2f3a4f;
   border-radius: 12px;

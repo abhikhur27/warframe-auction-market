@@ -9,6 +9,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Finds the lowest viable `WTS` order (buy-in anchor).
 - Finds multiple high-quality `WTB` buyers as fallback options.
 - Scores opportunities by spread, ROI, and expected profit.
+- Lets the result deck be re-sorted by expected profit, ROI, spread, or liquidity depending on trading posture.
 - Auto-find mode scans active market traffic and ranks candidates.
 - Current result sets can be exported as JSON or CSV after a scan.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
