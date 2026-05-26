@@ -113,6 +113,10 @@ The server intentionally throttles external calls:
 - max concurrent requests: `3`
 - per-request delay: `360ms`
 
+Health telemetry endpoint:
+
+- `GET /healthz` returns cache state, queue depth, active request count, and server timestamp.
+
 This lowers API pressure and reduces burst failures while scanning many items.
 
 ## Operational notes
@@ -133,3 +137,12 @@ This lowers API pressure and reduces burst failures while scanning many items.
 - Track realized fills vs predicted ROI to calibrate scoring.
 - Add item-level volatility and response-rate heuristics.
 - Add historical session snapshots for post-trade review.
+
+## Sanity Check Sequence
+
+Run this quick sequence after server changes:
+
+1. `npm start`
+2. `GET /healthz` and verify `ok: true`.
+3. Query `GET /api/items/search?q=arcane`.
+4. Run one `POST /api/analyze` payload with 2 known items.

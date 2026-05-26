@@ -584,6 +584,17 @@ app.post('/api/auto-find', async (req, res) => {
   }
 });
 
+app.get('/healthz', (req, res) => {
+  res.json({
+    ok: true,
+    cacheLoaded: itemCache.items.length > 0,
+    cacheAgeMs: itemCache.loadedAt ? Date.now() - itemCache.loadedAt : null,
+    queueDepth: requestQueue.pending.length,
+    activeRequests: requestQueue.active,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 const port = Number(process.env.PORT || 3000);
 app.listen(port, () => {
   console.log(`Warframe arbitrage app running at http://localhost:${port}`);
