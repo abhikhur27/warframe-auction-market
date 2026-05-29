@@ -568,7 +568,8 @@ app.post('/api/auto-find', async (req, res) => {
     });
 
     const candidates = getRecentCandidateItems(Array.isArray(recentOrders) ? recentOrders : [], options);
-    const selected = candidates.map((x) => x.item);
+    const analysisBudget = Math.min(candidates.length, Math.max(maxResults * 3, 30));
+    const selected = candidates.slice(0, analysisBudget).map((x) => x.item);
     const { result, errors } = await analyzeResolvedItems(selected, options);
 
     return res.json({
@@ -576,6 +577,7 @@ app.post('/api/auto-find', async (req, res) => {
       options,
       scannedCount: selected.length,
       candidateCount: candidates.length,
+      analysisBudget,
       result: result.slice(0, maxResults),
       errors,
     });
