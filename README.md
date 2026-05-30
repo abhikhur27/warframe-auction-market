@@ -147,3 +147,9 @@ Run this quick sequence after server changes:
 2. `GET /healthz` and verify `ok: true`.
 3. Query `GET /api/items/search?q=arcane`.
 4. Run one `POST /api/analyze` payload with 2 known items.
+
+## Portfolio Positioning
+
+- Project type: Node.js + Express web app
+- Verification path: npm install && npm start, then hit /health and test /api/analyze.
+
