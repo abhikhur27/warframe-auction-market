@@ -557,6 +557,18 @@ resultSortSelect.addEventListener('change', () => {
   }
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.defaultPrevented || event.altKey) return;
+  if (!(event.ctrlKey || event.metaKey) || event.key !== 'Enter') return;
+
+  event.preventDefault();
+  if (event.shiftKey) {
+    autoFind();
+    return;
+  }
+  analyze();
+});
+
 document
   .querySelectorAll('select, input[type="number"], input[name="status"]')
   .forEach((element) => element.addEventListener('change', syncUrlState));
