@@ -15,6 +15,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
+- Filters now include a minimum expected-profit threshold so low-yield flips do not crowd out better trades.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
 
 ## Stack

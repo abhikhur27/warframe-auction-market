@@ -116,6 +116,7 @@ function readFormState() {
     crossplay: document.getElementById('crossplay').value,
     minSpread: document.getElementById('min-spread').value,
     minRoi: document.getElementById('min-roi').value,
+    minExpectedProfit: document.getElementById('min-expected-profit').value,
     minRep: document.getElementById('min-rep').value,
     maxAge: document.getElementById('max-age').value,
     buyerOptions: document.getElementById('buyer-options').value,
@@ -135,6 +136,7 @@ function syncUrlState() {
   params.set('crossplay', formState.crossplay);
   params.set('minSpread', formState.minSpread);
   params.set('minRoi', formState.minRoi);
+  params.set('minExpectedProfit', formState.minExpectedProfit);
   params.set('minRep', formState.minRep);
   params.set('maxAge', formState.maxAge);
   params.set('buyerOptions', formState.buyerOptions);
@@ -153,6 +155,7 @@ function hydrateFromUrl() {
     ['crossplay', 'crossplay'],
     ['minSpread', 'min-spread'],
     ['minRoi', 'min-roi'],
+    ['minExpectedProfit', 'min-expected-profit'],
     ['minRep', 'min-rep'],
     ['maxAge', 'max-age'],
     ['buyerOptions', 'buyer-options'],
@@ -339,6 +342,7 @@ function buildCommonPayload() {
     statuses: getStatuses(),
     minSpread: Number(document.getElementById('min-spread').value),
     minRoiPct: Number(document.getElementById('min-roi').value),
+    minExpectedProfit: Number(document.getElementById('min-expected-profit').value),
     minReputation: Number(document.getElementById('min-rep').value),
     maxAgeHours: Number(document.getElementById('max-age').value),
     buyerOptionCount: Number(document.getElementById('buyer-options').value),

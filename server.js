@@ -267,6 +267,7 @@ function analyzeSingleItem(item, orders, options) {
   const minReputation = options.minReputation;
   const minSpread = options.minSpread;
   const minRoiPct = options.minRoiPct;
+  const minExpectedProfit = options.minExpectedProfit;
   const buyerOptionCount = options.buyerOptionCount;
   const sellerOptionCount = options.sellerOptionCount;
   const maxAgeHours = options.maxAgeHours;
@@ -321,7 +322,12 @@ function analyzeSingleItem(item, orders, options) {
           expectedProfit: spread * Math.max(quantity, 1),
         };
       })
-      .filter((entry) => entry.spread >= minSpread && entry.roiPct >= minRoiPct)
+      .filter(
+        (entry) =>
+          entry.spread >= minSpread &&
+          entry.roiPct >= minRoiPct &&
+          entry.expectedProfit >= minExpectedProfit
+      )
       .slice(0, buyerOptionCount);
 
     if (candidateBuys.length === 0) continue;
@@ -395,6 +401,7 @@ function parseAnalysisOptions(body = {}) {
     minReputation: Number.isFinite(Number(body.minReputation)) ? Number(body.minReputation) : 0,
     minSpread: Number.isFinite(Number(body.minSpread)) ? Number(body.minSpread) : 6,
     minRoiPct: Number.isFinite(Number(body.minRoiPct)) ? Number(body.minRoiPct) : 10,
+    minExpectedProfit: Number.isFinite(Number(body.minExpectedProfit)) ? Math.max(Number(body.minExpectedProfit), 0) : 20,
     buyerOptionCount: Number.isFinite(Number(body.buyerOptionCount)) ? Math.min(Math.max(Number(body.buyerOptionCount), 1), 8) : 4,
     sellerOptionCount: Number.isFinite(Number(body.sellerOptionCount)) ? Math.min(Math.max(Number(body.sellerOptionCount), 0), 8) : 3,
     maxAgeHours: Number.isFinite(Number(body.maxAgeHours)) ? Math.max(Number(body.maxAgeHours), 0) : 48,
