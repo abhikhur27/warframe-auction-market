@@ -268,6 +268,7 @@ function analyzeSingleItem(item, orders, options) {
   const minSpread = options.minSpread;
   const minRoiPct = options.minRoiPct;
   const minExpectedProfit = options.minExpectedProfit;
+  const minLiquidityOffers = options.minLiquidityOffers;
   const buyerOptionCount = options.buyerOptionCount;
   const sellerOptionCount = options.sellerOptionCount;
   const maxAgeHours = options.maxAgeHours;
@@ -303,6 +304,7 @@ function analyzeSingleItem(item, orders, options) {
     const buys = keepBestOffers(group.buys, 'desc');
 
     if (sells.length === 0 || buys.length === 0) continue;
+    if (sells.length < minLiquidityOffers || buys.length < minLiquidityOffers) continue;
 
     const buyPrices = buys.map((x) => x.platinum).filter((x) => Number.isFinite(x));
     const highOutlierFence = getHighOutlierFence(buyPrices);
@@ -402,6 +404,7 @@ function parseAnalysisOptions(body = {}) {
     minSpread: Number.isFinite(Number(body.minSpread)) ? Number(body.minSpread) : 6,
     minRoiPct: Number.isFinite(Number(body.minRoiPct)) ? Number(body.minRoiPct) : 10,
     minExpectedProfit: Number.isFinite(Number(body.minExpectedProfit)) ? Math.max(Number(body.minExpectedProfit), 0) : 20,
+    minLiquidityOffers: Number.isFinite(Number(body.minLiquidityOffers)) ? Math.min(Math.max(Number(body.minLiquidityOffers), 1), 12) : 1,
     buyerOptionCount: Number.isFinite(Number(body.buyerOptionCount)) ? Math.min(Math.max(Number(body.buyerOptionCount), 1), 8) : 4,
     sellerOptionCount: Number.isFinite(Number(body.sellerOptionCount)) ? Math.min(Math.max(Number(body.sellerOptionCount), 0), 8) : 3,
     maxAgeHours: Number.isFinite(Number(body.maxAgeHours)) ? Math.max(Number(body.maxAgeHours), 0) : 48,
