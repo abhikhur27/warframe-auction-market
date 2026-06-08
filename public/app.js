@@ -324,7 +324,7 @@ function renderResults(payload) {
 }
 
 function buildOpportunityBrief() {
-  const rows = lastResultsPayload?.result || [];
+  const rows = sortResultRows(lastResultsPayload?.result || []);
   if (!rows.length) {
     return 'No opportunities available.';
   }
