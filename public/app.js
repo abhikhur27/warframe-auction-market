@@ -16,6 +16,7 @@ const loadingEl = document.getElementById('loading');
 const summaryEl = document.getElementById('summary');
 const resultsEl = document.getElementById('results');
 const copyOpportunitiesButton = document.getElementById('copy-opportunities');
+const copyTopRouteButton = document.getElementById('copy-top-route');
 const exportResultsJsonButton = document.getElementById('export-results-json');
 const exportResultsCsvButton = document.getElementById('export-results-csv');
 const resultSortSelect = document.getElementById('result-sort');
@@ -338,6 +339,26 @@ function buildOpportunityBrief() {
   return ['Warframe Opportunity Brief', header, ...lines].join('\n');
 }
 
+function buildTopRouteBrief() {
+  const rows = sortResultRows(lastResultsPayload?.result || []);
+  if (!rows.length) {
+    return 'No opportunities available.';
+  }
+
+  const top = rows[0];
+  const buyer = top.buyerOptions?.[0];
+  if (!buyer) {
+    return 'Top opportunity does not have a buyer route yet.';
+  }
+
+  return [
+    `${top.item.name} ${top.variant.label}`,
+    `Buy: ${top.bestSell.whisper}`,
+    `Sell: ${buyer.whisper}`,
+    `Spread ${top.spread}p | ROI ${top.roiPct}% | Expected ${top.expectedProfit}p | Qty ${top.recommendedQuantity}`,
+  ].join('\n');
+}
+
 function buildCommonPayload() {
   return {
     platform: document.getElementById('platform').value,
@@ -400,6 +421,7 @@ async function runAnalysisRequest(url, payload, startMessage) {
     analyzeButton.disabled = false;
     autoFindButton.disabled = false;
     copyOpportunitiesButton.disabled = !(lastResultsPayload?.result || []).length;
+    copyTopRouteButton.disabled = !(lastResultsPayload?.result || []).length;
     exportResultsJsonButton.disabled = !(lastResultsPayload?.result || []).length;
     exportResultsCsvButton.disabled = !(lastResultsPayload?.result || []).length;
     setLoading('');
@@ -521,6 +543,20 @@ copyOpportunitiesButton.addEventListener('click', async () => {
     setSummary('Clipboard copy failed in this environment.', true);
   }
 });
+copyTopRouteButton.addEventListener('click', async () => {
+  const brief = buildTopRouteBrief();
+  if (brief === 'No opportunities available.' || brief === 'Top opportunity does not have a buyer route yet.') {
+    setSummary(brief, true);
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(brief);
+    setSummary('Copied the top buy/sell whisper route.', false);
+  } catch (_err) {
+    setSummary('Clipboard copy failed in this environment.', true);
+  }
+});
 exportResultsJsonButton.addEventListener('click', () => {
   if (!(lastResultsPayload?.result || []).length) {
     setSummary('Run an analysis first so there is something useful to export.', true);
@@ -555,6 +591,7 @@ exportResultsCsvButton.addEventListener('click', () => {
   setSummary('Exported the current opportunity set as CSV.', false);
 });
 copyOpportunitiesButton.disabled = true;
+copyTopRouteButton.disabled = true;
 exportResultsJsonButton.disabled = true;
 exportResultsCsvButton.disabled = true;
 resultSortSelect.addEventListener('change', () => {
