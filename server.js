@@ -255,6 +255,24 @@ function getHighOutlierFence(values) {
   return (q3 ?? values[0]) + 3 * iqr;
 }
 
+function ageHours(updatedAt) {
+  if (!updatedAt) return null;
+  const parsed = Date.parse(updatedAt);
+  if (Number.isNaN(parsed)) return null;
+  return Math.max(0, (Date.now() - parsed) / (1000 * 60 * 60));
+}
+
+function scoreExecutionConfidence(bestSell, topBuyer, sellCount, buyCount, sellerOptionCount, buyerOptionCount) {
+  const sellAge = ageHours(bestSell?.updatedAt);
+  const buyAge = ageHours(topBuyer?.order?.updatedAt);
+  const freshestAge = Math.max(0, Math.min(sellAge ?? 48, buyAge ?? 48));
+  const freshnessScore = Math.max(0, 40 - freshestAge * 3.5);
+  const liquidityScore = Math.min(35, (Math.min(sellCount, 6) * 3) + (Math.min(buyCount, 6) * 3));
+  const backupScore = Math.min(15, sellerOptionCount * 3 + buyerOptionCount * 2);
+  const quantityScore = Math.min(10, Math.max(bestSell?.quantity || 0, topBuyer?.quantity || 0));
+  return Math.round(freshnessScore + liquidityScore + backupScore + quantityScore);
+}
+
 function makeWhisper(order, itemName, variantLabel, actionWord) {
   const target = order?.user?.ingameName || 'unknown';
   const amount = order?.platinum;
@@ -336,6 +354,14 @@ function analyzeSingleItem(item, orders, options) {
 
     const top = candidateBuys[0];
     const variantLabel = formatVariantLabel(group.rank, group.subtype);
+    const executionScore = scoreExecutionConfidence(
+      bestSell,
+      top,
+      sells.length,
+      buys.length,
+      Math.max(Math.min(sells.length - 1, sellerOptionCount), 0),
+      candidateBuys.length
+    );
 
     const offer = {
       item: {
@@ -350,6 +376,7 @@ function analyzeSingleItem(item, orders, options) {
       spread: top.spread,
       roiPct: Number(top.roiPct.toFixed(1)),
       expectedProfit: top.expectedProfit,
+      executionScore,
       recommendedQuantity: top.quantity,
       bestSell: {
         price: bestSell.platinum,

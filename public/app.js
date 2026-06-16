@@ -276,6 +276,7 @@ function renderResults(payload) {
     metrics.append(metric('Spread', `${row.spread}p`));
     metrics.append(metric('ROI', `${row.roiPct}%`));
     metrics.append(metric('Expected', `${row.expectedProfit}p`));
+    metrics.append(metric('Execution', `${row.executionScore}/100`));
     metrics.append(metric('Qty', row.recommendedQuantity));
     metrics.append(metric('Liquidity', `WTS ${row.liquidity.sellOffers} / WTB ${row.liquidity.buyOffers}`));
 
@@ -443,6 +444,9 @@ function sortResultRows(rows) {
       const liquidityA = (a.liquidity?.buyOffers || 0) + (a.liquidity?.sellOffers || 0);
       const liquidityB = (b.liquidity?.buyOffers || 0) + (b.liquidity?.sellOffers || 0);
       return liquidityB - liquidityA || b.expectedProfit - a.expectedProfit;
+    }
+    if (mode === 'confidence') {
+      return (b.executionScore || 0) - (a.executionScore || 0) || b.expectedProfit - a.expectedProfit;
     }
     return b.expectedProfit - a.expectedProfit || b.roiPct - a.roiPct;
   });
