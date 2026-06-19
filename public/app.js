@@ -17,6 +17,7 @@ const summaryEl = document.getElementById('summary');
 const resultsEl = document.getElementById('results');
 const copyOpportunitiesButton = document.getElementById('copy-opportunities');
 const copyTopRouteButton = document.getElementById('copy-top-route');
+const exportResultsMarkdownButton = document.getElementById('export-results-md');
 const exportResultsJsonButton = document.getElementById('export-results-json');
 const exportResultsCsvButton = document.getElementById('export-results-csv');
 const resultSortSelect = document.getElementById('result-sort');
@@ -360,6 +361,43 @@ function buildTopRouteBrief() {
   ].join('\n');
 }
 
+function buildMarkdownBrief() {
+  const rows = sortResultRows(lastResultsPayload?.result || []);
+  if (!rows.length) {
+    return 'No opportunities available.';
+  }
+
+  const formState = readFormState();
+  const lines = [
+    '# Warframe Opportunity Brief',
+    '',
+    `- Generated: ${new Date().toISOString()}`,
+    `- Platform: ${formState.platform.toUpperCase()}`,
+    `- Statuses: ${formState.statuses.join(', ') || 'none'}`,
+    `- Filters: min spread ${formState.minSpread}p, min ROI ${formState.minRoi}%, min expected profit ${formState.minExpectedProfit}p, min offers ${formState.minLiquidityOffers}, max age ${formState.maxAge}h`,
+    `- Result sort: ${resultSortSelect.options[resultSortSelect.selectedIndex].text}`,
+    `- Summary: ${summaryEl.textContent || `Found ${rows.length} opportunities.`}`,
+    '',
+    '## Top routes',
+  ];
+
+  rows.slice(0, 8).forEach((row, index) => {
+    const buyer = row.buyerOptions?.[0];
+    lines.push(`### ${index + 1}. ${row.item.name} (${row.variant.label})`);
+    lines.push(`- Buy anchor: ${row.bestSell.price}p from ${personLine(row.bestSell.seller)}`);
+    lines.push(`- Top buyer: ${buyer ? `${buyer.price}p from ${personLine(buyer.buyer)}` : 'none'}`);
+    lines.push(`- Spread / ROI / Expected: ${row.spread}p / ${row.roiPct}% / ${row.expectedProfit}p`);
+    lines.push(`- Execution / Liquidity: ${row.executionScore}/100 | WTS ${row.liquidity.sellOffers} / WTB ${row.liquidity.buyOffers}`);
+    lines.push(`- Buy whisper: \`${row.bestSell.whisper}\``);
+    if (buyer?.whisper) {
+      lines.push(`- Sell whisper: \`${buyer.whisper}\``);
+    }
+    lines.push('');
+  });
+
+  return lines.join('\n');
+}
+
 function buildCommonPayload() {
   return {
     platform: document.getElementById('platform').value,
@@ -423,6 +461,7 @@ async function runAnalysisRequest(url, payload, startMessage) {
     autoFindButton.disabled = false;
     copyOpportunitiesButton.disabled = !(lastResultsPayload?.result || []).length;
     copyTopRouteButton.disabled = !(lastResultsPayload?.result || []).length;
+    exportResultsMarkdownButton.disabled = !(lastResultsPayload?.result || []).length;
     exportResultsJsonButton.disabled = !(lastResultsPayload?.result || []).length;
     exportResultsCsvButton.disabled = !(lastResultsPayload?.result || []).length;
     setLoading('');
@@ -561,6 +600,16 @@ copyTopRouteButton.addEventListener('click', async () => {
     setSummary('Clipboard copy failed in this environment.', true);
   }
 });
+exportResultsMarkdownButton.addEventListener('click', () => {
+  const markdown = buildMarkdownBrief();
+  if (markdown === 'No opportunities available.') {
+    setSummary('Run an analysis first so there is something useful to export.', true);
+    return;
+  }
+
+  downloadBlob('warframe-opportunity-brief.md', markdown, 'text/markdown');
+  setSummary('Exported the current opportunity set as Markdown.', false);
+});
 exportResultsJsonButton.addEventListener('click', () => {
   if (!(lastResultsPayload?.result || []).length) {
     setSummary('Run an analysis first so there is something useful to export.', true);
@@ -596,6 +645,7 @@ exportResultsCsvButton.addEventListener('click', () => {
 });
 copyOpportunitiesButton.disabled = true;
 copyTopRouteButton.disabled = true;
+exportResultsMarkdownButton.disabled = true;
 exportResultsJsonButton.disabled = true;
 exportResultsCsvButton.disabled = true;
 resultSortSelect.addEventListener('change', () => {

@@ -13,6 +13,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Lets the result deck be re-sorted by expected profit, ROI, spread, liquidity, or execution confidence depending on trading posture.
 - Auto-find mode scans active market traffic and ranks candidates.
 - Current result sets can be exported as JSON or CSV after a scan.
+- Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
