@@ -15,6 +15,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Current result sets can be exported as JSON or CSV after a scan.
 - Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
+- Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
 - Filters now include a minimum expected-profit threshold so low-yield flips do not crowd out better trades.
@@ -149,7 +150,7 @@ Run this quick sequence after server changes:
 
 1. `npm start`
 2. `GET /healthz` and verify `ok: true`.
-3. Query `GET /api/items/search?q=arcane`.
+3. Query `GET /api/items?q=arcane` (or the legacy `/api/items/search?q=arcane` alias).
 4. Run one `POST /api/analyze` payload with 2 known items.
 
 ## Portfolio Positioning

@@ -539,7 +539,7 @@ app.get('/api/health', async (_req, res) => {
   res.json({ ok: true, now: new Date().toISOString() });
 });
 
-app.get('/api/items', async (req, res) => {
+async function handleItemsLookup(req, res) {
   try {
     await ensureItemsLoaded();
     const q = String(req.query.q || '').trim();
@@ -553,7 +553,10 @@ app.get('/api/items', async (req, res) => {
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Failed to load items' });
   }
-});
+}
+
+app.get('/api/items', handleItemsLookup);
+app.get('/api/items/search', handleItemsLookup);
 
 app.post('/api/analyze', async (req, res) => {
   try {
@@ -621,6 +624,15 @@ app.post('/api/auto-find', async (req, res) => {
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Unknown server error' });
   }
+});
+
+// Backward-compatible alias for older README links and saved tooling.
+app.get('/api/items/search', async (req, res) => {
+  return app._router.handle(
+    { ...req, url: `/api/items?${new URLSearchParams(req.query).toString()}`, path: '/api/items' },
+    res,
+    () => {}
+  );
 });
 
 app.get('/healthz', (req, res) => {
