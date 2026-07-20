@@ -14,6 +14,7 @@ const autoFindButton = document.getElementById('auto-find');
 const copyShareLinkButton = document.getElementById('copy-share-link');
 const loadingEl = document.getElementById('loading');
 const summaryEl = document.getElementById('summary');
+const marketPostureEl = document.getElementById('market-posture');
 const resultsEl = document.getElementById('results');
 const copyOpportunitiesButton = document.getElementById('copy-opportunities');
 const copyTopRouteButton = document.getElementById('copy-top-route');
@@ -247,10 +248,81 @@ function offerWhisper(offer) {
   return code;
 }
 
+function ageFromIsoHours(value) {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return Math.max(0, (Date.now() - parsed) / (1000 * 60 * 60));
+}
+
+function classifyRoutePosture(row) {
+  const topBuyer = row.buyerOptions?.[0];
+  const freshestAge = Math.max(
+    ageFromIsoHours(row.bestSell?.updatedAt) ?? 48,
+    ageFromIsoHours(topBuyer?.updatedAt) ?? 48
+  );
+  const liquidity = (row.liquidity?.buyOffers || 0) + (row.liquidity?.sellOffers || 0);
+  const backupDepth = (row.sellerAlternatives?.length || 0) + (row.buyerOptions?.length || 0) - 1;
+
+  if (row.executionScore >= 72 && freshestAge <= 12 && liquidity >= 6) {
+    return {
+      tone: 'stable',
+      label: 'Stable route',
+      note: `Fresh quotes, ${liquidity} visible counterparties, and enough backup depth to survive one failed whisper.`,
+    };
+  }
+
+  if (row.executionScore >= 54 && freshestAge <= 24 && liquidity >= 4) {
+    return {
+      tone: 'watch',
+      label: 'Watchlist route',
+      note: `Usable spread, but freshness or counterpart depth is only moderate. Recheck before committing plat.`,
+    };
+  }
+
+  return {
+    tone: 'speculative',
+    label: 'Speculative route',
+    note: `Profit looks real, but the route is thin or stale. Treat it as a quick probe, not a dependable farm line.`,
+  };
+}
+
+function renderMarketPosture(rows) {
+  if (!marketPostureEl) return;
+  if (!rows.length) {
+    marketPostureEl.textContent = 'Run a scan to get a route posture summary.';
+    marketPostureEl.className = 'posture-card muted';
+    return;
+  }
+
+  const postureRows = rows.map((row) => ({ row, posture: classifyRoutePosture(row) }));
+  const stable = postureRows.filter((entry) => entry.posture.tone === 'stable');
+  const speculative = postureRows.filter((entry) => entry.posture.tone === 'speculative');
+  const bestStable = stable.sort((left, right) => right.row.expectedProfit - left.row.expectedProfit)[0];
+  const top = postureRows[0];
+  const label = stable.length >= Math.ceil(rows.length / 2)
+    ? 'Stable market posture'
+    : speculative.length >= Math.ceil(rows.length / 2)
+      ? 'Fragile market posture'
+      : 'Mixed market posture';
+
+  const note = bestStable
+    ? `Best stable route: ${bestStable.row.item.name} ${bestStable.row.variant.label} at ${bestStable.row.expectedProfit}p expected profit.`
+    : `Top route needs caution: ${top.row.item.name} ${top.row.variant.label} reads as ${top.posture.label.toLowerCase()}.`;
+
+  marketPostureEl.className = 'posture-card';
+  marketPostureEl.innerHTML = [
+    `<strong>${label}</strong>`,
+    `${stable.length} stable, ${rows.length - stable.length - speculative.length} watchlist, ${speculative.length} speculative route${speculative.length === 1 ? '' : 's'}.`,
+    note,
+  ].join('<br>');
+}
+
 function renderResults(payload) {
   lastResultsPayload = payload;
   resultsEl.innerHTML = '';
   const rows = sortResultRows(payload.result || []);
+  renderMarketPosture(rows);
 
   if (rows.length === 0) {
     setSummary('No opportunities passed your filters. Lower thresholds or include more items.', false);
@@ -269,9 +341,14 @@ function renderResults(payload) {
 
   for (const row of rows) {
     const node = template.content.firstElementChild.cloneNode(true);
+    const posture = classifyRoutePosture(row);
 
     node.querySelector('.item-name').textContent = row.item.name;
     node.querySelector('.variant').textContent = row.variant.label;
+    const postureBadge = node.querySelector('.posture-badge');
+    postureBadge.textContent = posture.label;
+    postureBadge.classList.add(posture.tone);
+    node.querySelector('.posture-note').textContent = posture.note;
 
     const metrics = node.querySelector('.metrics');
     metrics.append(metric('Spread', `${row.spread}p`));
@@ -382,8 +459,10 @@ function buildMarkdownBrief() {
   ];
 
   rows.slice(0, 8).forEach((row, index) => {
+    const posture = classifyRoutePosture(row);
     const buyer = row.buyerOptions?.[0];
     lines.push(`### ${index + 1}. ${row.item.name} (${row.variant.label})`);
+    lines.push(`- Route posture: ${posture.label} - ${posture.note}`);
     lines.push(`- Buy anchor: ${row.bestSell.price}p from ${personLine(row.bestSell.seller)}`);
     lines.push(`- Top buyer: ${buyer ? `${buyer.price}p from ${personLine(buyer.buyer)}` : 'none'}`);
     lines.push(`- Spread / ROI / Expected: ${row.spread}p / ${row.roiPct}% / ${row.expectedProfit}p`);

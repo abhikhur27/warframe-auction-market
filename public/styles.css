@@ -175,6 +175,14 @@ fieldset label {
   gap: 0.8rem;
 }
 
+.posture-card {
+  margin-top: 0.8rem;
+  border: 1px solid #2f4361;
+  border-radius: 12px;
+  padding: 0.85rem 0.95rem;
+  background: #111927;
+}
+
 .results-head {
   display: flex;
   align-items: center;
@@ -199,12 +207,19 @@ fieldset label {
 .result-card header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.8rem;
 }
 
 .result-card h3 {
   margin: 0;
+}
+
+.posture-inline {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  margin-top: 0.45rem;
 }
 
 .badge {
@@ -213,6 +228,28 @@ fieldset label {
   border: 1px solid #3a4a64;
   color: #b2c1d7;
   padding: 0.2rem 0.55rem;
+}
+
+.posture-badge {
+  border-color: #40657b;
+}
+
+.posture-badge.stable {
+  color: #7be0be;
+  border-color: rgba(123, 224, 190, 0.45);
+  background: rgba(24, 71, 56, 0.4);
+}
+
+.posture-badge.watch {
+  color: #f6cf78;
+  border-color: rgba(246, 207, 120, 0.45);
+  background: rgba(92, 67, 17, 0.34);
+}
+
+.posture-badge.speculative {
+  color: #ff9f96;
+  border-color: rgba(255, 159, 150, 0.45);
+  background: rgba(98, 34, 31, 0.34);
 }
 
 .metrics {
@@ -254,6 +291,10 @@ fieldset label {
 .secondary {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.posture-note {
+  margin-top: 0.65rem;
 }
 
 ol,

@@ -114,6 +114,7 @@
             <button id="export-results-csv" type="button" class="ghost">Export CSV</button>
           </div>
         </div>
+        <div id="market-posture" class="posture-card muted">Run a scan to get a route posture summary.</div>
         <div id="results" class="results"></div>
       </section>
     </main>
@@ -121,10 +122,16 @@
     <template id="result-template">
       <article class="result-card">
         <header>
-          <h3 class="item-name"></h3>
-          <span class="badge variant"></span>
+          <div>
+            <h3 class="item-name"></h3>
+            <div class="posture-inline">
+              <span class="badge variant"></span>
+              <span class="badge posture-badge"></span>
+            </div>
+          </div>
         </header>
         <div class="metrics"></div>
+        <div class="posture-note secondary"></div>
         <div class="columns">
           <section>
             <h4>Buy From (WTS)</h4>
