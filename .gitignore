@@ -3,3 +3,4 @@ node_modules/
 api_docs.html
 wf_index.js
 wf_chunk.js
+data/

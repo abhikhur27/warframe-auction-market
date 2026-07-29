@@ -15,6 +15,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Auto-find mode scans active market traffic and ranks candidates.
 - Current result sets can be exported as JSON or CSV after a scan.
 - Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
+- Every analyze/auto-find run is now archived as a local snapshot so you can review earlier route boards without hitting the live API again.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
@@ -102,6 +103,14 @@ Example payload:
 }
 ```
 
+### `GET /api/snapshots?limit=<n>`
+
+Returns recent local scan snapshot summaries for post-trade review.
+
+### `GET /api/snapshots/:id`
+
+Returns one saved local snapshot, including the captured result deck and filters.
+
 ## Opportunity model
 
 Each candidate is evaluated in a variant bucket (`rank`/`subtype`) and includes:
@@ -132,6 +141,7 @@ This lowers API pressure and reduces burst failures while scanning many items.
 - Keep multiple buyer options; first whisper failure is common.
 - Freshness filtering (`maxAgeHours`) is important because stale quotes can distort ROI.
 - Treat displayed profit as **pre-fee directional guidance**, not guaranteed realized outcome.
+- Snapshot history is stored locally in `data/session-snapshots.json` and is ignored by git.
 
 ## Automation / autostart (optional)
 
@@ -143,7 +153,7 @@ This lowers API pressure and reduces burst failures while scanning many items.
 
 - Track realized fills vs predicted ROI to calibrate scoring.
 - Add item-level volatility and response-rate heuristics.
-- Add historical session snapshots for post-trade review.
+- Add diffing between two saved snapshots to compare route decay or improvement.
 
 ## Sanity Check Sequence
 
@@ -153,9 +163,10 @@ Run this quick sequence after server changes:
 2. `GET /healthz` and verify `ok: true`.
 3. Query `GET /api/items?q=arcane` (or the legacy `/api/items/search?q=arcane` alias).
 4. Run one `POST /api/analyze` payload with 2 known items.
+5. Confirm `GET /api/snapshots?limit=3` returns the new run.
 
 ## Portfolio Positioning
 
 - Project type: Node.js + Express web app
-- Verification path: npm install && npm start, then hit /health and test /api/analyze.
+- Verification path: npm install && npm start, then hit `/health`, test `/api/analyze`, and confirm snapshot history loads.
 

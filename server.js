@@ -1,5 +1,10 @@
 const express = require('express');
 const path = require('path');
+const {
+  createSnapshot,
+  listSnapshotSummaries,
+  getSnapshotById,
+} = require('./snapshot-store');
 
 const API_BASE = 'https://api.warframe.market/v2';
 const DEFAULT_PLATFORM = 'pc';
@@ -465,7 +470,7 @@ async function analyzeResolvedItems(resolved, options) {
   return { result, errors };
 }
 
-function getRecentCandidateItems(recentOrders, options) {
+function getRecentCandidateItems(recentOrders, options, itemLookup = itemCache.byId) {
   const statusSet = new Set(options.statuses);
   const minReputation = options.minReputation;
   const maxAgeHours = options.maxAgeHours;
@@ -505,7 +510,7 @@ function getRecentCandidateItems(recentOrders, options) {
   const fallback = [];
 
   for (const stat of statsByItem.values()) {
-    const item = itemCache.byId.get(stat.itemId);
+    const item = itemLookup.get(stat.itemId);
     if (!item) continue;
 
     const spreadHint = Number.isFinite(stat.maxBuy) && Number.isFinite(stat.minSell)
@@ -576,8 +581,7 @@ app.post('/api/analyze', async (req, res) => {
 
     const options = parseAnalysisOptions(body);
     const { result, errors } = await analyzeResolvedItems(resolved, options);
-
-    return res.json({
+    const payload = {
       analyzedAt: new Date().toISOString(),
       options,
       requestedCount: rawItems.length,
@@ -585,6 +589,11 @@ app.post('/api/analyze', async (req, res) => {
       unresolved,
       result,
       errors,
+    };
+    const snapshot = createSnapshot('analyze', payload);
+    return res.json({
+      ...payload,
+      snapshotId: snapshot.id,
     });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Unknown server error' });
@@ -611,8 +620,7 @@ app.post('/api/auto-find', async (req, res) => {
     const analysisBudget = Math.min(candidates.length, Math.max(maxResults * 3, 30));
     const selected = candidates.slice(0, analysisBudget).map((x) => x.item);
     const { result, errors } = await analyzeResolvedItems(selected, options);
-
-    return res.json({
+    const payload = {
       analyzedAt: new Date().toISOString(),
       options,
       scannedCount: selected.length,
@@ -620,19 +628,28 @@ app.post('/api/auto-find', async (req, res) => {
       analysisBudget,
       result: result.slice(0, maxResults),
       errors,
+    };
+    const snapshot = createSnapshot('auto-find', payload);
+    return res.json({
+      ...payload,
+      snapshotId: snapshot.id,
     });
   } catch (error) {
     return res.status(500).json({ error: error.message || 'Unknown server error' });
   }
 });
 
-// Backward-compatible alias for older README links and saved tooling.
-app.get('/api/items/search', async (req, res) => {
-  return app._router.handle(
-    { ...req, url: `/api/items?${new URLSearchParams(req.query).toString()}`, path: '/api/items' },
-    res,
-    () => {}
-  );
+app.get('/api/snapshots', (req, res) => {
+  const limit = Number(req.query.limit || 12);
+  return res.json({ snapshots: listSnapshotSummaries(limit) });
+});
+
+app.get('/api/snapshots/:id', (req, res) => {
+  const snapshot = getSnapshotById(req.params.id);
+  if (!snapshot) {
+    return res.status(404).json({ error: 'Snapshot not found.' });
+  }
+  return res.json(snapshot);
 });
 
 app.get('/healthz', (req, res) => {
@@ -647,6 +664,18 @@ app.get('/healthz', (req, res) => {
 });
 
 const port = Number(process.env.PORT || 3000);
-app.listen(port, () => {
-  console.log(`Warframe arbitrage app running at http://localhost:${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`Warframe arbitrage app running at http://localhost:${port}`);
+  });
+}
+
+module.exports = {
+  app,
+  parseAnalysisOptions,
+  analyzeSingleItem,
+  getRecentCandidateItems,
+  scoreExecutionConfidence,
+  formatVariantLabel,
+  getHighOutlierFence,
+};

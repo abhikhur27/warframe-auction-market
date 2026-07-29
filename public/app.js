@@ -22,6 +22,9 @@ const exportResultsMarkdownButton = document.getElementById('export-results-md')
 const exportResultsJsonButton = document.getElementById('export-results-json');
 const exportResultsCsvButton = document.getElementById('export-results-csv');
 const resultSortSelect = document.getElementById('result-sort');
+const refreshSnapshotsButton = document.getElementById('refresh-snapshots');
+const snapshotStatusEl = document.getElementById('snapshot-status');
+const snapshotListEl = document.getElementById('snapshot-list');
 const template = document.getElementById('result-template');
 let lastResultsPayload = null;
 
@@ -318,6 +321,84 @@ function renderMarketPosture(rows) {
   ].join('<br>');
 }
 
+function snapshotLabel(snapshot) {
+  return snapshot.kind === 'auto-find' ? 'Auto-find snapshot' : 'Analyze snapshot';
+}
+
+function topRouteLine(snapshot) {
+  const top = snapshot.topRoute;
+  if (!top) return 'No qualifying routes were captured.';
+  return `${top.itemName} ${top.variantLabel} | ${top.expectedProfit}p expected | ${top.roiPct}% ROI`;
+}
+
+function renderSnapshots(snapshots) {
+  snapshotListEl.innerHTML = '';
+
+  if (!snapshots.length) {
+    snapshotStatusEl.textContent = 'No snapshots recorded yet. Run Analyze or Auto Find to build review history.';
+    return;
+  }
+
+  snapshotStatusEl.textContent = `Showing ${snapshots.length} recent local scan snapshot${snapshots.length === 1 ? '' : 's'}.`;
+  snapshots.forEach((snapshot) => {
+    const card = document.createElement('article');
+    card.className = 'snapshot-card';
+    const primaryCount = Number.isFinite(snapshot.resolvedCount)
+      ? `${snapshot.resolvedCount} resolved`
+      : Number.isFinite(snapshot.scannedCount)
+        ? `${snapshot.scannedCount} scanned`
+        : 'Review only';
+    card.innerHTML = `
+      <header>
+        <div>
+          <h3>${snapshotLabel(snapshot)}</h3>
+          <p class="secondary">${new Date(snapshot.analyzedAt).toLocaleString()} | ${snapshot.resultCount} routes | ${primaryCount}</p>
+        </div>
+        <button type="button" class="ghost" data-snapshot-id="${snapshot.id}">Review Snapshot</button>
+      </header>
+      <p class="secondary">${topRouteLine(snapshot)}</p>
+    `;
+    snapshotListEl.append(card);
+  });
+
+  snapshotListEl.querySelectorAll('[data-snapshot-id]').forEach((button) => {
+    button.addEventListener('click', () => reviewSnapshot(button.dataset.snapshotId));
+  });
+}
+
+async function loadSnapshots() {
+  snapshotStatusEl.textContent = 'Loading recent snapshots...';
+  snapshotListEl.innerHTML = '';
+  try {
+    const resp = await fetch('/api/snapshots?limit=8');
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data?.error || 'Snapshot history failed to load.');
+    }
+    renderSnapshots(Array.isArray(data.snapshots) ? data.snapshots : []);
+  } catch (_err) {
+    snapshotStatusEl.textContent = 'Snapshot history failed to load.';
+  }
+}
+
+async function reviewSnapshot(snapshotId) {
+  if (!snapshotId) return;
+  try {
+    setLoading('Loading snapshot...');
+    const resp = await fetch(`/api/snapshots/${encodeURIComponent(snapshotId)}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data?.error || 'Snapshot review failed.');
+    }
+    renderResults(data);
+    setSummary(`Viewing ${snapshotLabel(data).toLowerCase()} from ${new Date(data.analyzedAt).toLocaleString()}.`, false);
+  } catch (_err) {
+    setSummary('Failed to load that snapshot.', true);
+  } finally {
+    setLoading('');
+  }
+}
+
 function renderResults(payload) {
   lastResultsPayload = payload;
   resultsEl.innerHTML = '';
@@ -528,6 +609,7 @@ async function runAnalysisRequest(url, payload, startMessage) {
     }
 
     renderResults(data);
+    loadSnapshots();
 
     if (data.unresolved?.length) {
       setSummary(`${summaryEl.textContent} Unresolved: ${data.unresolved.join(', ')}`, false);
@@ -727,6 +809,7 @@ copyTopRouteButton.disabled = true;
 exportResultsMarkdownButton.disabled = true;
 exportResultsJsonButton.disabled = true;
 exportResultsCsvButton.disabled = true;
+refreshSnapshotsButton.addEventListener('click', loadSnapshots);
 resultSortSelect.addEventListener('change', () => {
   syncUrlState();
   if (lastResultsPayload) {
@@ -765,3 +848,4 @@ if (state.selectedItems.length) {
   ].forEach(addItem);
 }
 syncUrlState();
+loadSnapshots();

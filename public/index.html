@@ -117,6 +117,18 @@
         <div id="market-posture" class="posture-card muted">Run a scan to get a route posture summary.</div>
         <div id="results" class="results"></div>
       </section>
+
+      <section class="panel">
+        <div class="results-head">
+          <div>
+            <h2>Recent Snapshots</h2>
+            <p class="muted">Review recent local scans without rerunning live market requests.</p>
+          </div>
+          <button id="refresh-snapshots" type="button" class="ghost">Refresh Snapshot History</button>
+        </div>
+        <div id="snapshot-status" class="muted">Loading recent snapshots...</div>
+        <div id="snapshot-list" class="snapshot-list"></div>
+      </section>
     </main>
 
     <template id="result-template">

@@ -175,6 +175,36 @@ fieldset label {
   gap: 0.8rem;
 }
 
+.snapshot-list {
+  margin-top: 0.85rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.snapshot-card {
+  border: 1px solid #2f3a4f;
+  border-radius: 12px;
+  padding: 0.85rem 0.95rem;
+  background: #111723;
+}
+
+.snapshot-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.snapshot-card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.snapshot-card p {
+  margin: 0.3rem 0 0;
+}
+
 .posture-card {
   margin-top: 0.8rem;
   border: 1px solid #2f4361;
