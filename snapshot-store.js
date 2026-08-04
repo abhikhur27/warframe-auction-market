@@ -81,6 +81,94 @@ function getSnapshotById(id) {
   return readSnapshots().find((snapshot) => snapshot.id === id) || null;
 }
 
+function summarizeRoute(row) {
+  const topBuyer = Array.isArray(row?.buyerOptions) ? row.buyerOptions[0] : null;
+  return {
+    key: [
+      row?.item?.slug || row?.item?.name || 'unknown-item',
+      row?.variant?.label || 'Default',
+    ].join('::'),
+    itemName: row?.item?.name || 'Unknown item',
+    variantLabel: row?.variant?.label || 'Default',
+    expectedProfit: Number(row?.expectedProfit || 0),
+    roiPct: Number(row?.roiPct || 0),
+    executionScore: Number(row?.executionScore || 0),
+    buyPrice: Number(row?.bestSell?.price || 0),
+    sellPrice: Number(topBuyer?.price || 0),
+  };
+}
+
+function compareSnapshots(baseSnapshot, targetSnapshot) {
+  const baseRoutes = Array.isArray(baseSnapshot?.result) ? baseSnapshot.result.map(summarizeRoute) : [];
+  const targetRoutes = Array.isArray(targetSnapshot?.result) ? targetSnapshot.result.map(summarizeRoute) : [];
+
+  const baseMap = new Map(baseRoutes.map((route) => [route.key, route]));
+  const targetMap = new Map(targetRoutes.map((route) => [route.key, route]));
+
+  const matched = [];
+  const newRoutes = [];
+  const droppedRoutes = [];
+
+  for (const route of targetRoutes) {
+    const previous = baseMap.get(route.key);
+    if (!previous) {
+      newRoutes.push(route);
+      continue;
+    }
+
+    matched.push({
+      key: route.key,
+      itemName: route.itemName,
+      variantLabel: route.variantLabel,
+      previousProfit: previous.expectedProfit,
+      currentProfit: route.expectedProfit,
+      profitDelta: Number((route.expectedProfit - previous.expectedProfit).toFixed(1)),
+      previousRoiPct: previous.roiPct,
+      currentRoiPct: route.roiPct,
+      roiDelta: Number((route.roiPct - previous.roiPct).toFixed(1)),
+      previousExecutionScore: previous.executionScore,
+      currentExecutionScore: route.executionScore,
+      executionDelta: Number((route.executionScore - previous.executionScore).toFixed(1)),
+      previousBuyPrice: previous.buyPrice,
+      currentBuyPrice: route.buyPrice,
+      previousSellPrice: previous.sellPrice,
+      currentSellPrice: route.sellPrice,
+    });
+  }
+
+  for (const route of baseRoutes) {
+    if (!targetMap.has(route.key)) {
+      droppedRoutes.push(route);
+    }
+  }
+
+  const improvedRoutes = matched
+    .filter((route) => route.profitDelta > 0 || route.executionDelta > 0)
+    .sort((left, right) => right.profitDelta - left.profitDelta || right.executionDelta - left.executionDelta);
+  const decayedRoutes = matched
+    .filter((route) => route.profitDelta < 0 || route.executionDelta < 0)
+    .sort((left, right) => left.profitDelta - right.profitDelta || left.executionDelta - right.executionDelta);
+  const unchangedCount = matched.length - improvedRoutes.length - decayedRoutes.length;
+
+  const profitDeltaTotal = matched.reduce((sum, route) => sum + route.profitDelta, 0);
+  const roiDeltaTotal = matched.reduce((sum, route) => sum + route.roiDelta, 0);
+
+  return {
+    overlapCount: matched.length,
+    improvedCount: improvedRoutes.length,
+    decayedCount: decayedRoutes.length,
+    unchangedCount,
+    newCount: newRoutes.length,
+    droppedCount: droppedRoutes.length,
+    averageProfitDelta: matched.length ? Number((profitDeltaTotal / matched.length).toFixed(1)) : 0,
+    averageRoiDelta: matched.length ? Number((roiDeltaTotal / matched.length).toFixed(1)) : 0,
+    topImproved: improvedRoutes.slice(0, 5),
+    topDecayed: decayedRoutes.slice(0, 5),
+    newRoutes: newRoutes.slice(0, 5),
+    droppedRoutes: droppedRoutes.slice(0, 5),
+  };
+}
+
 module.exports = {
   SNAPSHOT_FILE,
   MAX_SNAPSHOTS,
@@ -88,4 +176,5 @@ module.exports = {
   listSnapshotSummaries,
   getSnapshotById,
   buildSnapshotSummary,
+  compareSnapshots,
 };

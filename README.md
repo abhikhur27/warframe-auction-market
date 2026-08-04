@@ -16,6 +16,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Current result sets can be exported as JSON or CSV after a scan.
 - Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
 - Every analyze/auto-find run is now archived as a local snapshot so you can review earlier route boards without hitting the live API again.
+- Older snapshots can be compared against the latest run so route decay, fresh openings, and profit swings are visible without manual diffing.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
@@ -111,6 +112,10 @@ Returns recent local scan snapshot summaries for post-trade review.
 
 Returns one saved local snapshot, including the captured result deck and filters.
 
+### `GET /api/snapshots/compare/:baseId/:targetId`
+
+Compares two saved snapshots and summarizes matched-route profit drift, ROI drift, and new or missing routes.
+
 ## Opportunity model
 
 Each candidate is evaluated in a variant bucket (`rank`/`subtype`) and includes:
@@ -153,7 +158,6 @@ This lowers API pressure and reduces burst failures while scanning many items.
 
 - Track realized fills vs predicted ROI to calibrate scoring.
 - Add item-level volatility and response-rate heuristics.
-- Add diffing between two saved snapshots to compare route decay or improvement.
 
 ## Sanity Check Sequence
 

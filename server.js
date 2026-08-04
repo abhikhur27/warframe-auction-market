@@ -4,6 +4,8 @@ const {
   createSnapshot,
   listSnapshotSummaries,
   getSnapshotById,
+  compareSnapshots,
+  buildSnapshotSummary,
 } = require('./snapshot-store');
 
 const API_BASE = 'https://api.warframe.market/v2';
@@ -644,6 +646,20 @@ app.get('/api/snapshots', (req, res) => {
   return res.json({ snapshots: listSnapshotSummaries(limit) });
 });
 
+app.get('/api/snapshots/compare/:baseId/:targetId', (req, res) => {
+  const baseSnapshot = getSnapshotById(req.params.baseId);
+  const targetSnapshot = getSnapshotById(req.params.targetId);
+  if (!baseSnapshot || !targetSnapshot) {
+    return res.status(404).json({ error: 'One or both snapshots were not found.' });
+  }
+
+  return res.json({
+    baseSnapshot: buildSnapshotSummary(baseSnapshot),
+    targetSnapshot: buildSnapshotSummary(targetSnapshot),
+    comparison: compareSnapshots(baseSnapshot, targetSnapshot),
+  });
+});
+
 app.get('/api/snapshots/:id', (req, res) => {
   const snapshot = getSnapshotById(req.params.id);
   if (!snapshot) {
@@ -678,4 +694,5 @@ module.exports = {
   scoreExecutionConfidence,
   formatVariantLabel,
   getHighOutlierFence,
+  compareSnapshots,
 };

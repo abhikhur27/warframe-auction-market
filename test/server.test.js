@@ -13,6 +13,7 @@ const {
   createSnapshot,
   listSnapshotSummaries,
   getSnapshotById,
+  compareSnapshots,
 } = require('../snapshot-store');
 
 function isoHoursAgo(hours) {
@@ -124,4 +125,65 @@ test('snapshot store persists summaries and full records', () => {
   const loaded = getSnapshotById(snapshot.id);
   assert.equal(loaded.id, snapshot.id);
   assert.equal(loaded.result[0].expectedProfit, 40);
+});
+
+test('compareSnapshots surfaces improved, decayed, new, and dropped routes', () => {
+  const baseSnapshot = createSnapshot('analyze', {
+    analyzedAt: '2026-08-01T12:00:00.000Z',
+    result: [
+      {
+        item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+        variant: { label: 'Default' },
+        expectedProfit: 40,
+        roiPct: 18.2,
+        executionScore: 70,
+        bestSell: { price: 80 },
+        buyerOptions: [{ price: 95 }],
+      },
+      {
+        item: { slug: 'adaptation', name: 'Adaptation' },
+        variant: { label: 'Default' },
+        expectedProfit: 25,
+        roiPct: 14,
+        executionScore: 61,
+        bestSell: { price: 20 },
+        buyerOptions: [{ price: 30 }],
+      },
+    ],
+  });
+
+  const targetSnapshot = createSnapshot('analyze', {
+    analyzedAt: '2026-08-04T12:00:00.000Z',
+    result: [
+      {
+        item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+        variant: { label: 'Default' },
+        expectedProfit: 52,
+        roiPct: 21.5,
+        executionScore: 76,
+        bestSell: { price: 79 },
+        buyerOptions: [{ price: 97 }],
+      },
+      {
+        item: { slug: 'blind-rage', name: 'Blind Rage' },
+        variant: { label: 'Default' },
+        expectedProfit: 31,
+        roiPct: 16.5,
+        executionScore: 58,
+        bestSell: { price: 40 },
+        buyerOptions: [{ price: 48 }],
+      },
+    ],
+  });
+
+  const comparison = compareSnapshots(baseSnapshot, targetSnapshot);
+  assert.equal(comparison.overlapCount, 1);
+  assert.equal(comparison.improvedCount, 1);
+  assert.equal(comparison.decayedCount, 0);
+  assert.equal(comparison.newCount, 1);
+  assert.equal(comparison.droppedCount, 1);
+  assert.equal(comparison.topImproved[0].itemName, 'Arcane Energize');
+  assert.equal(comparison.topImproved[0].profitDelta, 12);
+  assert.equal(comparison.newRoutes[0].itemName, 'Blind Rage');
+  assert.equal(comparison.droppedRoutes[0].itemName, 'Adaptation');
 });

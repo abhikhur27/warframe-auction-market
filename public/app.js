@@ -25,6 +25,7 @@ const resultSortSelect = document.getElementById('result-sort');
 const refreshSnapshotsButton = document.getElementById('refresh-snapshots');
 const snapshotStatusEl = document.getElementById('snapshot-status');
 const snapshotListEl = document.getElementById('snapshot-list');
+const snapshotCompareEl = document.getElementById('snapshot-compare');
 const template = document.getElementById('result-template');
 let lastResultsPayload = null;
 
@@ -331,6 +332,47 @@ function topRouteLine(snapshot) {
   return `${top.itemName} ${top.variantLabel} | ${top.expectedProfit}p expected | ${top.roiPct}% ROI`;
 }
 
+function formatSigned(value, suffix = '') {
+  const numeric = Number(value || 0);
+  const prefix = numeric > 0 ? '+' : '';
+  return `${prefix}${numeric}${suffix}`;
+}
+
+function comparisonRouteLine(route) {
+  return `${route.itemName} ${route.variantLabel} | ${formatSigned(route.profitDelta, 'p')} expected | ${formatSigned(route.roiDelta, '%')} ROI | ${formatSigned(route.executionDelta)} execution`;
+}
+
+function renderSnapshotComparison(payload) {
+  const comparison = payload?.comparison;
+  if (!comparison || !snapshotCompareEl) return;
+
+  const baseTime = new Date(payload.baseSnapshot.analyzedAt).toLocaleString();
+  const targetTime = new Date(payload.targetSnapshot.analyzedAt).toLocaleString();
+  const lines = [
+    `<strong>Latest-vs-earlier route drift</strong>`,
+    `${targetTime} compared with ${baseTime}. ${comparison.overlapCount} overlapping routes, ${comparison.newCount} new, ${comparison.droppedCount} missing.`,
+    `Average matched change: ${formatSigned(comparison.averageProfitDelta, 'p')} expected profit and ${formatSigned(comparison.averageRoiDelta, '%')} ROI.`,
+  ];
+
+  if (comparison.topImproved.length) {
+    lines.push('Best improvements:');
+    lines.push(`<ul>${comparison.topImproved.map((route) => `<li>${comparisonRouteLine(route)}</li>`).join('')}</ul>`);
+  }
+
+  if (comparison.topDecayed.length) {
+    lines.push('Biggest decay:');
+    lines.push(`<ul>${comparison.topDecayed.map((route) => `<li>${comparisonRouteLine(route)}</li>`).join('')}</ul>`);
+  }
+
+  if (comparison.newRoutes.length) {
+    lines.push('New routes in the latest run:');
+    lines.push(`<ul>${comparison.newRoutes.map((route) => `<li>${route.itemName} ${route.variantLabel} | ${route.expectedProfit}p expected | ${route.roiPct}% ROI</li>`).join('')}</ul>`);
+  }
+
+  snapshotCompareEl.classList.remove('muted');
+  snapshotCompareEl.innerHTML = lines.join('<br>');
+}
+
 function renderSnapshots(snapshots) {
   snapshotListEl.innerHTML = '';
 
@@ -340,6 +382,7 @@ function renderSnapshots(snapshots) {
   }
 
   snapshotStatusEl.textContent = `Showing ${snapshots.length} recent local scan snapshot${snapshots.length === 1 ? '' : 's'}.`;
+  const latestSnapshot = snapshots[0];
   snapshots.forEach((snapshot) => {
     const card = document.createElement('article');
     card.className = 'snapshot-card';
@@ -348,13 +391,19 @@ function renderSnapshots(snapshots) {
       : Number.isFinite(snapshot.scannedCount)
         ? `${snapshot.scannedCount} scanned`
         : 'Review only';
+    const compareButton = latestSnapshot && latestSnapshot.id !== snapshot.id
+      ? `<button type="button" class="ghost" data-compare-base-id="${snapshot.id}" data-compare-target-id="${latestSnapshot.id}">Compare With Latest</button>`
+      : '';
     card.innerHTML = `
       <header>
         <div>
           <h3>${snapshotLabel(snapshot)}</h3>
           <p class="secondary">${new Date(snapshot.analyzedAt).toLocaleString()} | ${snapshot.resultCount} routes | ${primaryCount}</p>
         </div>
-        <button type="button" class="ghost" data-snapshot-id="${snapshot.id}">Review Snapshot</button>
+        <div class="snapshot-actions">
+          <button type="button" class="ghost" data-snapshot-id="${snapshot.id}">Review Snapshot</button>
+          ${compareButton}
+        </div>
       </header>
       <p class="secondary">${topRouteLine(snapshot)}</p>
     `;
@@ -363,6 +412,9 @@ function renderSnapshots(snapshots) {
 
   snapshotListEl.querySelectorAll('[data-snapshot-id]').forEach((button) => {
     button.addEventListener('click', () => reviewSnapshot(button.dataset.snapshotId));
+  });
+  snapshotListEl.querySelectorAll('[data-compare-base-id]').forEach((button) => {
+    button.addEventListener('click', () => compareSnapshotPair(button.dataset.compareBaseId, button.dataset.compareTargetId));
   });
 }
 
@@ -394,6 +446,24 @@ async function reviewSnapshot(snapshotId) {
     setSummary(`Viewing ${snapshotLabel(data).toLowerCase()} from ${new Date(data.analyzedAt).toLocaleString()}.`, false);
   } catch (_err) {
     setSummary('Failed to load that snapshot.', true);
+  } finally {
+    setLoading('');
+  }
+}
+
+async function compareSnapshotPair(baseSnapshotId, targetSnapshotId) {
+  if (!baseSnapshotId || !targetSnapshotId) return;
+  try {
+    setLoading('Comparing snapshots...');
+    const resp = await fetch(`/api/snapshots/compare/${encodeURIComponent(baseSnapshotId)}/${encodeURIComponent(targetSnapshotId)}`);
+    const data = await resp.json();
+    if (!resp.ok) {
+      throw new Error(data?.error || 'Snapshot comparison failed.');
+    }
+    renderSnapshotComparison(data);
+    setSummary(`Compared the latest snapshot against ${new Date(data.baseSnapshot.analyzedAt).toLocaleString()}.`, false);
+  } catch (_err) {
+    setSummary('Failed to compare those snapshots.', true);
   } finally {
     setLoading('');
   }

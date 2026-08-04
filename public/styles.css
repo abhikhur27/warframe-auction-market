@@ -205,6 +205,29 @@ fieldset label {
   margin: 0.3rem 0 0;
 }
 
+.snapshot-actions {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.snapshot-compare {
+  margin-top: 0.8rem;
+  border: 1px solid #2f4361;
+  border-radius: 12px;
+  padding: 0.85rem 0.95rem;
+  background: #111927;
+}
+
+.snapshot-compare strong {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.snapshot-compare ul {
+  margin-top: 0.45rem;
+}
+
 .posture-card {
   margin-top: 0.8rem;
   border: 1px solid #2f4361;
