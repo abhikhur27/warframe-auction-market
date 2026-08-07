@@ -1,5 +1,5 @@
 {
-  "name": "new-project",
+  "name": "warframe-auction-market",
   "version": "1.0.0",
   "description": "Warframe market spread finder for practical flip opportunities.",
   "main": "server.js",

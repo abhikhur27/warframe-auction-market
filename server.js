@@ -280,6 +280,70 @@ function scoreExecutionConfidence(bestSell, topBuyer, sellCount, buyCount, selle
   return Math.round(freshnessScore + liquidityScore + backupScore + quantityScore);
 }
 
+function buildStressTest(bestSell, sells, candidateBuys) {
+  const backupSeller = sells[1] || null;
+  const backupBuyer = candidateBuys[1] || null;
+
+  if (!backupSeller || !backupBuyer) {
+    return {
+      backupRouteReady: false,
+      conservativeSpread: 0,
+      conservativeRoiPct: 0,
+      conservativeExpectedProfit: 0,
+      conservativeQuantity: 0,
+      profitRetentionPct: 0,
+      backupSeller: backupSeller ? {
+        price: backupSeller.platinum,
+        quantity: backupSeller.quantity,
+        updatedAt: backupSeller.updatedAt,
+        seller: backupSeller.user,
+      } : null,
+      backupBuyer: backupBuyer ? {
+        price: backupBuyer.order.platinum,
+        quantity: backupBuyer.order.quantity,
+        updatedAt: backupBuyer.order.updatedAt,
+        buyer: backupBuyer.order.user,
+      } : null,
+      summary: !backupSeller && !backupBuyer
+        ? 'No second-route fallback yet. The spread only works off the first visible quote on both sides.'
+        : !backupSeller
+          ? 'No backup seller matched the filter, so the buy-in anchor could disappear.'
+          : 'No backup buyer matched the filter, so one failed whisper can collapse the route.',
+    };
+  }
+
+  const conservativeSpread = backupBuyer.order.platinum - backupSeller.platinum;
+  const conservativeQuantity = Math.max(
+    1,
+    Math.min(backupBuyer.quantity || 1, backupSeller.quantity || 1)
+  );
+  const conservativeExpectedProfit = conservativeSpread * conservativeQuantity;
+  const conservativeRoiPct = backupSeller.platinum > 0
+    ? (conservativeSpread / backupSeller.platinum) * 100
+    : 0;
+
+  return {
+    backupRouteReady: true,
+    conservativeSpread,
+    conservativeRoiPct: Number(conservativeRoiPct.toFixed(1)),
+    conservativeExpectedProfit,
+    conservativeQuantity,
+    backupSeller: {
+      price: backupSeller.platinum,
+      quantity: backupSeller.quantity,
+      updatedAt: backupSeller.updatedAt,
+      seller: backupSeller.user,
+    },
+    backupBuyer: {
+      price: backupBuyer.order.platinum,
+      quantity: backupBuyer.order.quantity,
+      updatedAt: backupBuyer.order.updatedAt,
+      buyer: backupBuyer.order.user,
+    },
+    summary: `Second-best route still clears ${conservativeExpectedProfit}p across ${conservativeQuantity} item(s) if the top quote disappears.`,
+  };
+}
+
 function makeWhisper(order, itemName, variantLabel, actionWord) {
   const target = order?.user?.ingameName || 'unknown';
   const amount = order?.platinum;
@@ -293,6 +357,7 @@ function analyzeSingleItem(item, orders, options) {
   const minSpread = options.minSpread;
   const minRoiPct = options.minRoiPct;
   const minExpectedProfit = options.minExpectedProfit;
+  const minConservativeProfit = options.minConservativeProfit;
   const minLiquidityOffers = options.minLiquidityOffers;
   const buyerOptionCount = options.buyerOptionCount;
   const sellerOptionCount = options.sellerOptionCount;
@@ -369,6 +434,14 @@ function analyzeSingleItem(item, orders, options) {
       Math.max(Math.min(sells.length - 1, sellerOptionCount), 0),
       candidateBuys.length
     );
+    const stressTest = buildStressTest(bestSell, sells, candidateBuys);
+    const profitRetentionPct = top.expectedProfit > 0
+      ? Number(((stressTest.conservativeExpectedProfit / top.expectedProfit) * 100).toFixed(1))
+      : 0;
+
+    if (stressTest.conservativeExpectedProfit < minConservativeProfit) {
+      continue;
+    }
 
     const offer = {
       item: {
@@ -385,6 +458,10 @@ function analyzeSingleItem(item, orders, options) {
       expectedProfit: top.expectedProfit,
       executionScore,
       recommendedQuantity: top.quantity,
+      stressTest: {
+        ...stressTest,
+        profitRetentionPct,
+      },
       bestSell: {
         price: bestSell.platinum,
         quantity: bestSell.quantity,
@@ -438,6 +515,7 @@ function parseAnalysisOptions(body = {}) {
     minSpread: Number.isFinite(Number(body.minSpread)) ? Number(body.minSpread) : 6,
     minRoiPct: Number.isFinite(Number(body.minRoiPct)) ? Number(body.minRoiPct) : 10,
     minExpectedProfit: Number.isFinite(Number(body.minExpectedProfit)) ? Math.max(Number(body.minExpectedProfit), 0) : 20,
+    minConservativeProfit: Number.isFinite(Number(body.minConservativeProfit)) ? Math.max(Number(body.minConservativeProfit), 0) : 0,
     minLiquidityOffers: Number.isFinite(Number(body.minLiquidityOffers)) ? Math.min(Math.max(Number(body.minLiquidityOffers), 1), 12) : 1,
     buyerOptionCount: Number.isFinite(Number(body.buyerOptionCount)) ? Math.min(Math.max(Number(body.buyerOptionCount), 1), 8) : 4,
     sellerOptionCount: Number.isFinite(Number(body.sellerOptionCount)) ? Math.min(Math.max(Number(body.sellerOptionCount), 0), 8) : 3,
@@ -692,6 +770,7 @@ module.exports = {
   analyzeSingleItem,
   getRecentCandidateItems,
   scoreExecutionConfidence,
+  buildStressTest,
   formatVariantLabel,
   getHighOutlierFence,
   compareSnapshots,

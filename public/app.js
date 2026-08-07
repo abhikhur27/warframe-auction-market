@@ -124,6 +124,7 @@ function readFormState() {
     minSpread: document.getElementById('min-spread').value,
     minRoi: document.getElementById('min-roi').value,
     minExpectedProfit: document.getElementById('min-expected-profit').value,
+    minConservativeProfit: document.getElementById('min-conservative-profit').value,
     minLiquidityOffers: document.getElementById('min-liquidity-offers').value,
     minRep: document.getElementById('min-rep').value,
     maxAge: document.getElementById('max-age').value,
@@ -145,6 +146,7 @@ function syncUrlState() {
   params.set('minSpread', formState.minSpread);
   params.set('minRoi', formState.minRoi);
   params.set('minExpectedProfit', formState.minExpectedProfit);
+  params.set('minConservativeProfit', formState.minConservativeProfit);
   params.set('minLiquidityOffers', formState.minLiquidityOffers);
   params.set('minRep', formState.minRep);
   params.set('maxAge', formState.maxAge);
@@ -165,6 +167,7 @@ function hydrateFromUrl() {
     ['minSpread', 'min-spread'],
     ['minRoi', 'min-roi'],
     ['minExpectedProfit', 'min-expected-profit'],
+    ['minConservativeProfit', 'min-conservative-profit'],
     ['minLiquidityOffers', 'min-liquidity-offers'],
     ['minRep', 'min-rep'],
     ['maxAge', 'max-age'],
@@ -505,9 +508,15 @@ function renderResults(payload) {
     metrics.append(metric('Spread', `${row.spread}p`));
     metrics.append(metric('ROI', `${row.roiPct}%`));
     metrics.append(metric('Expected', `${row.expectedProfit}p`));
+    metrics.append(metric('Fallback', `${row.stressTest?.conservativeExpectedProfit ?? 0}p`));
     metrics.append(metric('Execution', `${row.executionScore}/100`));
+    metrics.append(metric('Retention', `${row.stressTest?.profitRetentionPct ?? 0}%`));
     metrics.append(metric('Qty', row.recommendedQuantity));
     metrics.append(metric('Liquidity', `WTS ${row.liquidity.sellOffers} / WTB ${row.liquidity.buyOffers}`));
+    const stressNote = document.createElement('div');
+    stressNote.className = 'secondary stress-note';
+    stressNote.textContent = row.stressTest?.summary || 'No fallback route summary available.';
+    node.append(stressNote);
 
     const bestSell = node.querySelector('.best-sell');
     bestSell.innerHTML = `<div class="price">${row.bestSell.price}p</div>`;
@@ -603,6 +612,7 @@ function buildMarkdownBrief() {
     `- Platform: ${formState.platform.toUpperCase()}`,
     `- Statuses: ${formState.statuses.join(', ') || 'none'}`,
     `- Filters: min spread ${formState.minSpread}p, min ROI ${formState.minRoi}%, min expected profit ${formState.minExpectedProfit}p, min offers ${formState.minLiquidityOffers}, max age ${formState.maxAge}h`,
+    `- Fallback filter: min fallback profit ${formState.minConservativeProfit}p`,
     `- Result sort: ${resultSortSelect.options[resultSortSelect.selectedIndex].text}`,
     `- Summary: ${summaryEl.textContent || `Found ${rows.length} opportunities.`}`,
     '',
@@ -617,6 +627,8 @@ function buildMarkdownBrief() {
     lines.push(`- Buy anchor: ${row.bestSell.price}p from ${personLine(row.bestSell.seller)}`);
     lines.push(`- Top buyer: ${buyer ? `${buyer.price}p from ${personLine(buyer.buyer)}` : 'none'}`);
     lines.push(`- Spread / ROI / Expected: ${row.spread}p / ${row.roiPct}% / ${row.expectedProfit}p`);
+    lines.push(`- Fallback route: ${row.stressTest?.conservativeExpectedProfit ?? 0}p expected | ${row.stressTest?.profitRetentionPct ?? 0}% profit retention`);
+    lines.push(`- Fallback note: ${row.stressTest?.summary || 'No fallback route summary available.'}`);
     lines.push(`- Execution / Liquidity: ${row.executionScore}/100 | WTS ${row.liquidity.sellOffers} / WTB ${row.liquidity.buyOffers}`);
     lines.push(`- Buy whisper: \`${row.bestSell.whisper}\``);
     if (buyer?.whisper) {
@@ -636,6 +648,7 @@ function buildCommonPayload() {
     minSpread: Number(document.getElementById('min-spread').value),
     minRoiPct: Number(document.getElementById('min-roi').value),
     minExpectedProfit: Number(document.getElementById('min-expected-profit').value),
+    minConservativeProfit: Number(document.getElementById('min-conservative-profit').value),
     minLiquidityOffers: Number(document.getElementById('min-liquidity-offers').value),
     minReputation: Number(document.getElementById('min-rep').value),
     maxAgeHours: Number(document.getElementById('max-age').value),
@@ -857,7 +870,7 @@ exportResultsCsvButton.addEventListener('click', () => {
     return;
   }
 
-  const csvRows = ['item,variant,spread,roi_pct,expected_profit,recommended_quantity,best_sell,best_buy'];
+  const csvRows = ['item,variant,spread,roi_pct,expected_profit,fallback_profit,profit_retention_pct,recommended_quantity,best_sell,best_buy'];
   rows.forEach((row) => {
     csvRows.push([
       `"${row.item.name}"`,
@@ -865,6 +878,8 @@ exportResultsCsvButton.addEventListener('click', () => {
       row.spread,
       row.roiPct,
       row.expectedProfit,
+      row.stressTest?.conservativeExpectedProfit ?? 0,
+      row.stressTest?.profitRetentionPct ?? 0,
       row.recommendedQuantity,
       row.bestSell.price,
       row.buyerOptions?.[0]?.price ?? '',

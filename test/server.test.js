@@ -7,6 +7,7 @@ const {
   parseAnalysisOptions,
   analyzeSingleItem,
   getRecentCandidateItems,
+  buildStressTest,
 } = require('../server');
 const {
   SNAPSHOT_FILE,
@@ -30,6 +31,7 @@ test('parseAnalysisOptions clamps and normalizes incoming values', () => {
     crossplay: 'false',
     statuses: ['InGame', 'ONLINE'],
     minExpectedProfit: '-8',
+    minConservativeProfit: '-4',
     minLiquidityOffers: '99',
     buyerOptionCount: '0',
     sellerOptionCount: '-2',
@@ -39,6 +41,7 @@ test('parseAnalysisOptions clamps and normalizes incoming values', () => {
   assert.equal(options.crossplay, false);
   assert.deepEqual(options.statuses, ['ingame', 'online']);
   assert.equal(options.minExpectedProfit, 0);
+  assert.equal(options.minConservativeProfit, 0);
   assert.equal(options.minLiquidityOffers, 12);
   assert.equal(options.buyerOptionCount, 1);
   assert.equal(options.sellerOptionCount, 0);
@@ -76,8 +79,49 @@ test('analyzeSingleItem returns the best viable route and filters stale or weak 
   assert.equal(analyzed.buyerOptions[0].price, 95);
   assert.equal(analyzed.spread, 15);
   assert.equal(analyzed.expectedProfit, 30);
+  assert.equal(analyzed.stressTest.conservativeExpectedProfit, 24);
+  assert.equal(analyzed.stressTest.profitRetentionPct, 80);
+  assert.equal(analyzed.stressTest.backupRouteReady, true);
   assert.equal(analyzed.buyerOptions.some((entry) => entry.price === 500), false);
   assert.match(analyzed.bestSell.whisper, /Arcane Energize/);
+});
+
+test('analyzeSingleItem can require fallback profit instead of top-of-book profit only', () => {
+  const item = { slug: 'arcane-energize', name: 'Arcane Energize' };
+  const orders = [
+    { visible: true, type: 'sell', platinum: 80, quantity: 2, perTrade: 1, updatedAt: isoHoursAgo(1), user: { reputation: 10, status: 'ingame', ingameName: 'SellerA' } },
+    { visible: true, type: 'sell', platinum: 85, quantity: 2, perTrade: 1, updatedAt: isoHoursAgo(1), user: { reputation: 10, status: 'ingame', ingameName: 'SellerB' } },
+    { visible: true, type: 'buy', platinum: 95, quantity: 2, perTrade: 1, updatedAt: isoHoursAgo(1), user: { reputation: 10, status: 'ingame', ingameName: 'BuyerA' } },
+    { visible: true, type: 'buy', platinum: 90, quantity: 2, perTrade: 1, updatedAt: isoHoursAgo(1), user: { reputation: 10, status: 'ingame', ingameName: 'BuyerB' } },
+  ];
+
+  const strictResult = analyzeSingleItem(item, orders, {
+    statuses: ['ingame'],
+    minReputation: 0,
+    minSpread: 5,
+    minRoiPct: 0,
+    minExpectedProfit: 10,
+    minConservativeProfit: 12,
+    minLiquidityOffers: 1,
+    buyerOptionCount: 3,
+    sellerOptionCount: 2,
+    maxAgeHours: 24,
+  });
+
+  assert.equal(strictResult, null);
+});
+
+test('buildStressTest explains when no backup route exists', () => {
+  const bestSell = { platinum: 80, quantity: 2, updatedAt: isoHoursAgo(1), user: { ingameName: 'SellerA' } };
+  const onlyBuyer = [{
+    order: { platinum: 95, quantity: 2, updatedAt: isoHoursAgo(1), user: { ingameName: 'BuyerA' } },
+    quantity: 2,
+  }];
+  const result = buildStressTest(bestSell, [bestSell], onlyBuyer);
+
+  assert.equal(result.backupRouteReady, false);
+  assert.equal(result.conservativeExpectedProfit, 0);
+  assert.match(result.summary, /No second-route fallback|No backup/);
 });
 
 test('getRecentCandidateItems ranks active two-sided items ahead of thin candidates', () => {

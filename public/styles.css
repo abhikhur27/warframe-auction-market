@@ -350,6 +350,10 @@ fieldset label {
   margin-top: 0.65rem;
 }
 
+.stress-note {
+  margin-top: 0.45rem;
+}
+
 ol,
 ul {
   margin: 0;

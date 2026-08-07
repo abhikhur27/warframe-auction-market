@@ -22,6 +22,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
 - Filters by status (`ingame`/`online`), reputation, order freshness, and trade quality.
 - Filters now include a minimum expected-profit threshold so low-yield flips do not crowd out better trades.
+- Filters can now require minimum fallback profit so brittle top-of-book routes do not outrank routes with real backup depth.
 - Filters can require a minimum number of buy and sell offers so one-off spikes do not masquerade as liquid opportunities.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
 
@@ -80,6 +81,7 @@ Example payload:
   "minReputation": 8,
   "minSpread": 6,
   "minRoiPct": 10,
+  "minConservativeProfit": 12,
   "buyerOptionCount": 4,
   "sellerOptionCount": 3,
   "maxAgeHours": 48
@@ -100,6 +102,7 @@ Example payload:
   "minReputation": 8,
   "minSpread": 6,
   "minRoiPct": 10,
+  "minConservativeProfit": 12,
   "maxResults": 25
 }
 ```
@@ -122,8 +125,10 @@ Each candidate is evaluated in a variant bucket (`rank`/`subtype`) and includes:
 
 - Buy anchor price (best seller).
 - Buyer alternatives sorted by payout quality.
+- Fallback-route stress test using the second-best buyer and seller when available.
 - Spread and ROI.
 - Expected profit estimate.
+- Conservative profit retention so one failed whisper does not hide route fragility.
 - Liquidity hints (`buyOffers` vs `sellOffers`).
 - Prebuilt whisper templates for faster execution.
 
