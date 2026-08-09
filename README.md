@@ -17,6 +17,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
 - Every analyze/auto-find run is now archived as a local snapshot so you can review earlier route boards without hitting the live API again.
 - Older snapshots can be compared against the latest run so route decay, fresh openings, and profit swings are visible without manual diffing.
+- Current route cards now use recent snapshot history to label each line as new, improving, stable, or decaying so one lucky spread does not get mistaken for a durable market edge.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
@@ -152,6 +153,7 @@ This lowers API pressure and reduces burst failures while scanning many items.
 - Freshness filtering (`maxAgeHours`) is important because stale quotes can distort ROI.
 - Treat displayed profit as **pre-fee directional guidance**, not guaranteed realized outcome.
 - Snapshot history is stored locally in `data/session-snapshots.json` and is ignored by git.
+- Route momentum is derived from the recent local snapshot history only; a route marked `New` can still be strong, it just lacks local replay context.
 
 ## Automation / autostart (optional)
 

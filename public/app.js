@@ -294,6 +294,19 @@ function classifyRoutePosture(row) {
   };
 }
 
+function classifyMomentum(row) {
+  const momentum = row.momentum;
+  if (!momentum) {
+    return {
+      tone: 'stable',
+      label: 'No history',
+      note: 'This run does not have snapshot history context yet.',
+    };
+  }
+
+  return momentum;
+}
+
 function renderMarketPosture(rows) {
   if (!marketPostureEl) return;
   if (!rows.length) {
@@ -496,13 +509,18 @@ function renderResults(payload) {
   for (const row of rows) {
     const node = template.content.firstElementChild.cloneNode(true);
     const posture = classifyRoutePosture(row);
+    const momentum = classifyMomentum(row);
 
     node.querySelector('.item-name').textContent = row.item.name;
     node.querySelector('.variant').textContent = row.variant.label;
     const postureBadge = node.querySelector('.posture-badge');
     postureBadge.textContent = posture.label;
     postureBadge.classList.add(posture.tone);
+    const momentumBadge = node.querySelector('.momentum-badge');
+    momentumBadge.textContent = momentum.label;
+    momentumBadge.classList.add(momentum.tone);
     node.querySelector('.posture-note').textContent = posture.note;
+    node.querySelector('.momentum-note').textContent = momentum.note;
 
     const metrics = node.querySelector('.metrics');
     metrics.append(metric('Spread', `${row.spread}p`));
@@ -513,6 +531,10 @@ function renderResults(payload) {
     metrics.append(metric('Retention', `${row.stressTest?.profitRetentionPct ?? 0}%`));
     metrics.append(metric('Qty', row.recommendedQuantity));
     metrics.append(metric('Liquidity', `WTS ${row.liquidity.sellOffers} / WTB ${row.liquidity.buyOffers}`));
+    if (momentum.seenCount) {
+      metrics.append(metric('Trend', `${momentum.latestProfitDelta > 0 ? '+' : ''}${momentum.latestProfitDelta}p vs last`));
+      metrics.append(metric('Seen', `${momentum.seenCount} snapshot${momentum.seenCount === 1 ? '' : 's'}`));
+    }
     const stressNote = document.createElement('div');
     stressNote.className = 'secondary stress-note';
     stressNote.textContent = row.stressTest?.summary || 'No fallback route summary available.';
@@ -624,6 +646,9 @@ function buildMarkdownBrief() {
     const buyer = row.buyerOptions?.[0];
     lines.push(`### ${index + 1}. ${row.item.name} (${row.variant.label})`);
     lines.push(`- Route posture: ${posture.label} - ${posture.note}`);
+    if (row.momentum) {
+      lines.push(`- Route momentum: ${row.momentum.label} - ${row.momentum.note}`);
+    }
     lines.push(`- Buy anchor: ${row.bestSell.price}p from ${personLine(row.bestSell.seller)}`);
     lines.push(`- Top buyer: ${buyer ? `${buyer.price}p from ${personLine(buyer.buyer)}` : 'none'}`);
     lines.push(`- Spread / ROI / Expected: ${row.spread}p / ${row.roiPct}% / ${row.expectedProfit}p`);

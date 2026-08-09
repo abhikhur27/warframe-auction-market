@@ -305,6 +305,30 @@ fieldset label {
   background: rgba(98, 34, 31, 0.34);
 }
 
+.momentum-badge.new {
+  color: #8bd3ff;
+  border-color: rgba(139, 211, 255, 0.45);
+  background: rgba(26, 63, 91, 0.34);
+}
+
+.momentum-badge.improving {
+  color: #7be0be;
+  border-color: rgba(123, 224, 190, 0.45);
+  background: rgba(24, 71, 56, 0.34);
+}
+
+.momentum-badge.stable {
+  color: #d9dfeb;
+  border-color: rgba(173, 185, 204, 0.42);
+  background: rgba(54, 63, 79, 0.34);
+}
+
+.momentum-badge.decaying {
+  color: #ffb48f;
+  border-color: rgba(255, 180, 143, 0.45);
+  background: rgba(91, 49, 26, 0.34);
+}
+
 .metrics {
   margin-top: 0.55rem;
   display: flex;
@@ -348,6 +372,10 @@ fieldset label {
 
 .posture-note {
   margin-top: 0.65rem;
+}
+
+.momentum-note {
+  margin-top: 0.35rem;
 }
 
 .stress-note {

@@ -98,6 +98,102 @@ function summarizeRoute(row) {
   };
 }
 
+function buildRouteMomentum(history, currentRoute) {
+  const previous = history[0] || null;
+  if (!previous) {
+    return {
+      label: 'New route',
+      tone: 'new',
+      note: 'This route has not appeared in recent local snapshots yet.',
+      seenCount: 0,
+      averageProfitDelta: 0,
+      averageExecutionDelta: 0,
+      latestProfitDelta: 0,
+      latestExecutionDelta: 0,
+      lastSeenAt: null,
+      bestRecentProfit: 0,
+      history: [],
+    };
+  }
+
+  const profitDeltas = history.map((entry) => currentRoute.expectedProfit - entry.expectedProfit);
+  const executionDeltas = history.map((entry) => currentRoute.executionScore - entry.executionScore);
+  const averageProfitDelta = Number((profitDeltas.reduce((sum, value) => sum + value, 0) / history.length).toFixed(1));
+  const averageExecutionDelta = Number((executionDeltas.reduce((sum, value) => sum + value, 0) / history.length).toFixed(1));
+  const latestProfitDelta = Number((currentRoute.expectedProfit - previous.expectedProfit).toFixed(1));
+  const latestExecutionDelta = Number((currentRoute.executionScore - previous.executionScore).toFixed(1));
+  const bestRecentProfit = history.reduce(
+    (maxProfit, entry) => Math.max(maxProfit, entry.expectedProfit),
+    Number(previous.expectedProfit || 0)
+  );
+
+  let tone = 'stable';
+  let label = 'Stable route';
+  let note = `Seen in ${history.length} recent snapshot${history.length === 1 ? '' : 's'} with only small drift.`;
+
+  if (latestProfitDelta >= 8 || averageProfitDelta >= 6 || latestExecutionDelta >= 6) {
+    tone = 'improving';
+    label = 'Improving route';
+    note = `Up ${latestProfitDelta > 0 ? '+' : ''}${latestProfitDelta}p vs the last matching snapshot with ${latestExecutionDelta > 0 ? '+' : ''}${latestExecutionDelta} execution drift.`;
+  } else if (latestProfitDelta <= -8 || averageProfitDelta <= -6 || latestExecutionDelta <= -6) {
+    tone = 'decaying';
+    label = 'Decaying route';
+    note = `Down ${latestProfitDelta}p vs the last matching snapshot with ${latestExecutionDelta > 0 ? '+' : ''}${latestExecutionDelta} execution drift.`;
+  }
+
+  return {
+    label,
+    tone,
+    note,
+    seenCount: history.length,
+    averageProfitDelta,
+    averageExecutionDelta,
+    latestProfitDelta,
+    latestExecutionDelta,
+    lastSeenAt: previous.analyzedAt || null,
+    bestRecentProfit,
+    history: history.map((entry) => ({
+      analyzedAt: entry.analyzedAt,
+      expectedProfit: entry.expectedProfit,
+      roiPct: entry.roiPct,
+      executionScore: entry.executionScore,
+    })),
+  };
+}
+
+function attachSnapshotContext(resultRows, snapshots, historyLimit = 3) {
+  const rows = Array.isArray(resultRows) ? resultRows : [];
+  const priorSnapshots = Array.isArray(snapshots) ? snapshots : [];
+  const routeHistory = new Map();
+
+  for (const snapshot of priorSnapshots) {
+    const analyzedAt = snapshot?.analyzedAt || null;
+    const routes = Array.isArray(snapshot?.result) ? snapshot.result : [];
+    for (const route of routes) {
+      const summary = summarizeRoute(route);
+      if (!routeHistory.has(summary.key)) {
+        routeHistory.set(summary.key, []);
+      }
+
+      const history = routeHistory.get(summary.key);
+      if (history.length >= historyLimit) continue;
+      history.push({
+        ...summary,
+        analyzedAt,
+      });
+    }
+  }
+
+  return rows.map((row) => {
+    const summary = summarizeRoute(row);
+    const history = routeHistory.get(summary.key) || [];
+    return {
+      ...row,
+      momentum: buildRouteMomentum(history, summary),
+    };
+  });
+}
+
 function compareSnapshots(baseSnapshot, targetSnapshot) {
   const baseRoutes = Array.isArray(baseSnapshot?.result) ? baseSnapshot.result.map(summarizeRoute) : [];
   const targetRoutes = Array.isArray(targetSnapshot?.result) ? targetSnapshot.result.map(summarizeRoute) : [];
@@ -177,4 +273,5 @@ module.exports = {
   getSnapshotById,
   buildSnapshotSummary,
   compareSnapshots,
+  attachSnapshotContext,
 };

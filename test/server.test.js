@@ -15,6 +15,7 @@ const {
   listSnapshotSummaries,
   getSnapshotById,
   compareSnapshots,
+  attachSnapshotContext,
 } = require('../snapshot-store');
 
 function isoHoursAgo(hours) {
@@ -230,4 +231,65 @@ test('compareSnapshots surfaces improved, decayed, new, and dropped routes', () 
   assert.equal(comparison.topImproved[0].profitDelta, 12);
   assert.equal(comparison.newRoutes[0].itemName, 'Blind Rage');
   assert.equal(comparison.droppedRoutes[0].itemName, 'Adaptation');
+});
+
+test('attachSnapshotContext annotates routes with improving and new momentum', () => {
+  createSnapshot('analyze', {
+    analyzedAt: '2026-08-01T12:00:00.000Z',
+    result: [
+      {
+        item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+        variant: { label: 'Default' },
+        expectedProfit: 32,
+        roiPct: 17.5,
+        executionScore: 63,
+        bestSell: { price: 81 },
+        buyerOptions: [{ price: 93 }],
+      },
+    ],
+  });
+
+  createSnapshot('analyze', {
+    analyzedAt: '2026-08-03T12:00:00.000Z',
+    result: [
+      {
+        item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+        variant: { label: 'Default' },
+        expectedProfit: 40,
+        roiPct: 19.2,
+        executionScore: 69,
+        bestSell: { price: 80 },
+        buyerOptions: [{ price: 95 }],
+      },
+    ],
+  });
+
+  const annotated = attachSnapshotContext([
+    {
+      item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+      variant: { label: 'Default' },
+      expectedProfit: 51,
+      roiPct: 21.5,
+      executionScore: 77,
+      bestSell: { price: 79 },
+      buyerOptions: [{ price: 97 }],
+    },
+    {
+      item: { slug: 'blind-rage', name: 'Blind Rage' },
+      variant: { label: 'Default' },
+      expectedProfit: 24,
+      roiPct: 12.5,
+      executionScore: 58,
+      bestSell: { price: 41 },
+      buyerOptions: [{ price: 47 }],
+    },
+  ], [getSnapshotById(listSnapshotSummaries(2)[0].id), getSnapshotById(listSnapshotSummaries(2)[1].id)]);
+
+  assert.equal(annotated[0].momentum.label, 'Improving route');
+  assert.equal(annotated[0].momentum.tone, 'improving');
+  assert.equal(annotated[0].momentum.seenCount, 2);
+  assert.equal(annotated[0].momentum.latestProfitDelta, 11);
+  assert.equal(annotated[1].momentum.label, 'New route');
+  assert.equal(annotated[1].momentum.tone, 'new');
+  assert.equal(annotated[1].momentum.seenCount, 0);
 });

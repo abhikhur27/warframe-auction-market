@@ -6,6 +6,7 @@ const {
   getSnapshotById,
   compareSnapshots,
   buildSnapshotSummary,
+  attachSnapshotContext,
 } = require('./snapshot-store');
 
 const API_BASE = 'https://api.warframe.market/v2';
@@ -550,6 +551,10 @@ async function analyzeResolvedItems(resolved, options) {
   return { result, errors };
 }
 
+function enrichResultRowsWithSnapshotContext(rows) {
+  return attachSnapshotContext(rows, listSnapshotSummaries(8).map((summary) => getSnapshotById(summary.id)));
+}
+
 function getRecentCandidateItems(recentOrders, options, itemLookup = itemCache.byId) {
   const statusSet = new Set(options.statuses);
   const minReputation = options.minReputation;
@@ -661,13 +666,14 @@ app.post('/api/analyze', async (req, res) => {
 
     const options = parseAnalysisOptions(body);
     const { result, errors } = await analyzeResolvedItems(resolved, options);
+    const enrichedResult = enrichResultRowsWithSnapshotContext(result);
     const payload = {
       analyzedAt: new Date().toISOString(),
       options,
       requestedCount: rawItems.length,
       resolvedCount: resolved.length,
       unresolved,
-      result,
+      result: enrichedResult,
       errors,
     };
     const snapshot = createSnapshot('analyze', payload);
@@ -700,13 +706,14 @@ app.post('/api/auto-find', async (req, res) => {
     const analysisBudget = Math.min(candidates.length, Math.max(maxResults * 3, 30));
     const selected = candidates.slice(0, analysisBudget).map((x) => x.item);
     const { result, errors } = await analyzeResolvedItems(selected, options);
+    const enrichedResult = enrichResultRowsWithSnapshotContext(result);
     const payload = {
       analyzedAt: new Date().toISOString(),
       options,
       scannedCount: selected.length,
       candidateCount: candidates.length,
       analysisBudget,
-      result: result.slice(0, maxResults),
+      result: enrichedResult.slice(0, maxResults),
       errors,
     };
     const snapshot = createSnapshot('auto-find', payload);
