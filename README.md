@@ -16,8 +16,11 @@ This project is designed for **decision support** during manual trading, not ful
 - Current result sets can be exported as JSON or CSV after a scan.
 - Current result sets can also be exported as a Markdown trading brief for quick review or Discord/notes sharing.
 - Every analyze/auto-find run is now archived as a local snapshot so you can review earlier route boards without hitting the live API again.
+- Reviewing a saved snapshot restores the same Copy and Export actions as a live scan.
 - Older snapshots can be compared against the latest run so route decay, fresh openings, and profit swings are visible without manual diffing.
 - Current route cards now use recent snapshot history to label each line as new, improving, stable, or decaying so one lucky spread does not get mistaken for a durable market edge.
+- Snapshot momentum and comparisons use versioned route fingerprints that include market, crossplay, item, rank, and subtype identity, preventing console or variant scans from being blended into a false trend.
+- Snapshot comparisons refuse cross-market drift calculations and classify conflicting profit/ROI/execution movement as mixed instead of double-counting it as both improved and decayed.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
@@ -154,6 +157,7 @@ This lowers API pressure and reduces burst failures while scanning many items.
 - Treat displayed profit as **pre-fee directional guidance**, not guaranteed realized outcome.
 - Snapshot history is stored locally in `data/session-snapshots.json` and is ignored by git.
 - Route momentum is derived from the recent local snapshot history only; a route marked `New` can still be strong, it just lacks local replay context.
+- Only snapshots from the same platform, language, and crossplay market are comparable. Filter thresholds may differ without changing route identity.
 
 ## Automation / autostart (optional)
 

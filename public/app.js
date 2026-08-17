@@ -116,6 +116,15 @@ function setSummary(text, isError = false) {
   summaryEl.classList.toggle('error', Boolean(isError));
 }
 
+function syncResultActionState() {
+  const disabled = !(lastResultsPayload?.result || []).length;
+  copyOpportunitiesButton.disabled = disabled;
+  copyTopRouteButton.disabled = disabled;
+  exportResultsMarkdownButton.disabled = disabled;
+  exportResultsJsonButton.disabled = disabled;
+  exportResultsCsvButton.disabled = disabled;
+}
+
 function readFormState() {
   return {
     items: state.selectedItems,
@@ -348,6 +357,10 @@ function topRouteLine(snapshot) {
   return `${top.itemName} ${top.variantLabel} | ${top.expectedProfit}p expected | ${top.roiPct}% ROI`;
 }
 
+function marketContextLine(snapshot) {
+  return snapshot?.marketContext?.label || 'PC | Crossplay | EN';
+}
+
 function formatSigned(value, suffix = '') {
   const numeric = Number(value || 0);
   const prefix = numeric > 0 ? '+' : '';
@@ -364,9 +377,19 @@ function renderSnapshotComparison(payload) {
 
   const baseTime = new Date(payload.baseSnapshot.analyzedAt).toLocaleString();
   const targetTime = new Date(payload.targetSnapshot.analyzedAt).toLocaleString();
+  if (comparison.compatible === false) {
+    snapshotCompareEl.classList.remove('muted');
+    snapshotCompareEl.innerHTML = [
+      '<strong>Snapshots are not comparable</strong>',
+      comparison.message,
+    ].join('<br>');
+    return;
+  }
+
   const lines = [
     `<strong>Latest-vs-earlier route drift</strong>`,
-    `${targetTime} compared with ${baseTime}. ${comparison.overlapCount} overlapping routes, ${comparison.newCount} new, ${comparison.droppedCount} missing.`,
+    `${targetTime} compared with ${baseTime} in ${comparison.baseMarketContext.label}.`,
+    `${comparison.overlapCount} overlapping routes: ${comparison.improvedCount} improved, ${comparison.decayedCount} decayed, ${comparison.mixedCount || 0} mixed, and ${comparison.unchangedCount} unchanged. ${comparison.newCount} new and ${comparison.droppedCount} missing.`,
     `Average matched change: ${formatSigned(comparison.averageProfitDelta, 'p')} expected profit and ${formatSigned(comparison.averageRoiDelta, '%')} ROI.`,
   ];
 
@@ -378,6 +401,11 @@ function renderSnapshotComparison(payload) {
   if (comparison.topDecayed.length) {
     lines.push('Biggest decay:');
     lines.push(`<ul>${comparison.topDecayed.map((route) => `<li>${comparisonRouteLine(route)}</li>`).join('')}</ul>`);
+  }
+
+  if (comparison.mixedRoutes?.length) {
+    lines.push('Mixed movement:');
+    lines.push(`<ul>${comparison.mixedRoutes.map((route) => `<li>${comparisonRouteLine(route)}</li>`).join('')}</ul>`);
   }
 
   if (comparison.newRoutes.length) {
@@ -414,7 +442,7 @@ function renderSnapshots(snapshots) {
       <header>
         <div>
           <h3>${snapshotLabel(snapshot)}</h3>
-          <p class="secondary">${new Date(snapshot.analyzedAt).toLocaleString()} | ${snapshot.resultCount} routes | ${primaryCount}</p>
+          <p class="secondary">${new Date(snapshot.analyzedAt).toLocaleString()} | ${marketContextLine(snapshot)} | ${snapshot.resultCount} routes | ${primaryCount}</p>
         </div>
         <div class="snapshot-actions">
           <button type="button" class="ghost" data-snapshot-id="${snapshot.id}">Review Snapshot</button>
@@ -477,7 +505,11 @@ async function compareSnapshotPair(baseSnapshotId, targetSnapshotId) {
       throw new Error(data?.error || 'Snapshot comparison failed.');
     }
     renderSnapshotComparison(data);
-    setSummary(`Compared the latest snapshot against ${new Date(data.baseSnapshot.analyzedAt).toLocaleString()}.`, false);
+    if (data.comparison?.compatible === false) {
+      setSummary('Comparison skipped because the snapshots cover different markets.', false);
+    } else {
+      setSummary(`Compared the latest snapshot against ${new Date(data.baseSnapshot.analyzedAt).toLocaleString()}.`, false);
+    }
   } catch (_err) {
     setSummary('Failed to compare those snapshots.', true);
   } finally {
@@ -487,6 +519,7 @@ async function compareSnapshotPair(baseSnapshotId, targetSnapshotId) {
 
 function renderResults(payload) {
   lastResultsPayload = payload;
+  syncResultActionState();
   resultsEl.innerHTML = '';
   const rows = sortResultRows(payload.result || []);
   renderMarketPosture(rows);
@@ -728,11 +761,7 @@ async function runAnalysisRequest(url, payload, startMessage) {
   } finally {
     analyzeButton.disabled = false;
     autoFindButton.disabled = false;
-    copyOpportunitiesButton.disabled = !(lastResultsPayload?.result || []).length;
-    copyTopRouteButton.disabled = !(lastResultsPayload?.result || []).length;
-    exportResultsMarkdownButton.disabled = !(lastResultsPayload?.result || []).length;
-    exportResultsJsonButton.disabled = !(lastResultsPayload?.result || []).length;
-    exportResultsCsvButton.disabled = !(lastResultsPayload?.result || []).length;
+    syncResultActionState();
     setLoading('');
   }
 }

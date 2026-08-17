@@ -5,6 +5,11 @@ const crypto = require('crypto');
 const SNAPSHOT_DIR = path.join(__dirname, 'data');
 const SNAPSHOT_FILE = path.join(SNAPSHOT_DIR, 'session-snapshots.json');
 const MAX_SNAPSHOTS = 40;
+const DEFAULT_MARKET_CONTEXT = Object.freeze({
+  platform: 'pc',
+  language: 'en',
+  crossplay: true,
+});
 
 function ensureSnapshotDir() {
   fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
@@ -30,6 +35,55 @@ function writeSnapshots(snapshots) {
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(snapshots, null, 2));
 }
 
+function normalizeBoolean(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value === 'boolean') return value;
+  return String(value).trim().toLowerCase() === 'true';
+}
+
+function normalizeIdentityPart(value, fallback) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  return normalized || fallback;
+}
+
+function normalizeMarketContext(options = {}) {
+  const platform = normalizeIdentityPart(options.platform, DEFAULT_MARKET_CONTEXT.platform);
+  const language = normalizeIdentityPart(options.language, DEFAULT_MARKET_CONTEXT.language);
+  const crossplay = normalizeBoolean(options.crossplay, DEFAULT_MARKET_CONTEXT.crossplay);
+  const platformLabels = {
+    pc: 'PC',
+    ps4: 'PlayStation',
+    xbox: 'Xbox',
+    switch: 'Switch',
+  };
+
+  return {
+    platform,
+    language,
+    crossplay,
+    key: [platform, language, crossplay ? 'crossplay' : 'platform-only'].join('::'),
+    label: `${platformLabels[platform] || platform.toUpperCase()} | ${crossplay ? 'Crossplay' : 'Platform only'} | ${language.toUpperCase()}`,
+  };
+}
+
+function buildVariantIdentity(variant = {}) {
+  const rank = Number.isInteger(variant.rank) ? variant.rank : null;
+  const subtype = normalizeIdentityPart(variant.subtype, '');
+
+  if (rank !== null || subtype) {
+    return `rank=${rank ?? 'none'}::subtype=${subtype || 'none'}`;
+  }
+
+  return `legacy=${normalizeIdentityPart(variant.label, 'default')}`;
+}
+
+function buildRouteFingerprint(row, options = {}) {
+  const context = normalizeMarketContext(options);
+  const itemIdentity = normalizeIdentityPart(row?.item?.slug || row?.item?.name, 'unknown-item');
+  const variantIdentity = buildVariantIdentity(row?.variant);
+  return ['route-v2', context.key, itemIdentity, variantIdentity].join('::');
+}
+
 function buildSnapshotSummary(snapshot) {
   const top = snapshot.result?.[0];
   return {
@@ -40,6 +94,7 @@ function buildSnapshotSummary(snapshot) {
     requestedCount: snapshot.requestedCount ?? null,
     resolvedCount: snapshot.resolvedCount ?? null,
     scannedCount: snapshot.scannedCount ?? null,
+    marketContext: normalizeMarketContext(snapshot.options),
     topRoute: top ? {
       itemName: top.item?.name || 'Unknown item',
       variantLabel: top.variant?.label || 'Default',
@@ -81,13 +136,13 @@ function getSnapshotById(id) {
   return readSnapshots().find((snapshot) => snapshot.id === id) || null;
 }
 
-function summarizeRoute(row) {
+function summarizeRoute(row, options = {}) {
   const topBuyer = Array.isArray(row?.buyerOptions) ? row.buyerOptions[0] : null;
+  const routeFingerprint = buildRouteFingerprint(row, options);
   return {
-    key: [
-      row?.item?.slug || row?.item?.name || 'unknown-item',
-      row?.variant?.label || 'Default',
-    ].join('::'),
+    key: routeFingerprint,
+    routeFingerprint,
+    marketContext: normalizeMarketContext(options),
     itemName: row?.item?.name || 'Unknown item',
     variantLabel: row?.variant?.label || 'Default',
     expectedProfit: Number(row?.expectedProfit || 0),
@@ -161,7 +216,7 @@ function buildRouteMomentum(history, currentRoute) {
   };
 }
 
-function attachSnapshotContext(resultRows, snapshots, historyLimit = 3) {
+function attachSnapshotContext(resultRows, snapshots, currentOptions = {}, historyLimit = 3) {
   const rows = Array.isArray(resultRows) ? resultRows : [];
   const priorSnapshots = Array.isArray(snapshots) ? snapshots : [];
   const routeHistory = new Map();
@@ -170,7 +225,7 @@ function attachSnapshotContext(resultRows, snapshots, historyLimit = 3) {
     const analyzedAt = snapshot?.analyzedAt || null;
     const routes = Array.isArray(snapshot?.result) ? snapshot.result : [];
     for (const route of routes) {
-      const summary = summarizeRoute(route);
+      const summary = summarizeRoute(route, snapshot?.options);
       if (!routeHistory.has(summary.key)) {
         routeHistory.set(summary.key, []);
       }
@@ -185,18 +240,68 @@ function attachSnapshotContext(resultRows, snapshots, historyLimit = 3) {
   }
 
   return rows.map((row) => {
-    const summary = summarizeRoute(row);
+    const summary = summarizeRoute(row, currentOptions);
     const history = routeHistory.get(summary.key) || [];
     return {
       ...row,
+      routeFingerprint: summary.routeFingerprint,
       momentum: buildRouteMomentum(history, summary),
     };
   });
 }
 
+function emptyComparison(baseContext, targetContext, compatible, message) {
+  return {
+    compatible,
+    message,
+    baseMarketContext: baseContext,
+    targetMarketContext: targetContext,
+    overlapCount: 0,
+    improvedCount: 0,
+    decayedCount: 0,
+    mixedCount: 0,
+    unchangedCount: 0,
+    newCount: 0,
+    droppedCount: 0,
+    averageProfitDelta: 0,
+    averageRoiDelta: 0,
+    topImproved: [],
+    topDecayed: [],
+    mixedRoutes: [],
+    newRoutes: [],
+    droppedRoutes: [],
+  };
+}
+
+function classifyRouteChange(route) {
+  const deltas = [route.profitDelta, route.roiDelta, route.executionDelta];
+  const hasGain = deltas.some((value) => value > 0);
+  const hasLoss = deltas.some((value) => value < 0);
+  if (hasGain && hasLoss) return 'mixed';
+  if (hasGain) return 'improved';
+  if (hasLoss) return 'decayed';
+  return 'unchanged';
+}
+
 function compareSnapshots(baseSnapshot, targetSnapshot) {
-  const baseRoutes = Array.isArray(baseSnapshot?.result) ? baseSnapshot.result.map(summarizeRoute) : [];
-  const targetRoutes = Array.isArray(targetSnapshot?.result) ? targetSnapshot.result.map(summarizeRoute) : [];
+  const baseContext = normalizeMarketContext(baseSnapshot?.options);
+  const targetContext = normalizeMarketContext(targetSnapshot?.options);
+
+  if (baseContext.key !== targetContext.key) {
+    return emptyComparison(
+      baseContext,
+      targetContext,
+      false,
+      `These snapshots cover different markets (${baseContext.label} vs ${targetContext.label}), so route drift was not calculated.`
+    );
+  }
+
+  const baseRoutes = Array.isArray(baseSnapshot?.result)
+    ? baseSnapshot.result.map((route) => summarizeRoute(route, baseSnapshot?.options))
+    : [];
+  const targetRoutes = Array.isArray(targetSnapshot?.result)
+    ? targetSnapshot.result.map((route) => summarizeRoute(route, targetSnapshot?.options))
+    : [];
 
   const baseMap = new Map(baseRoutes.map((route) => [route.key, route]));
   const targetMap = new Map(targetRoutes.map((route) => [route.key, route]));
@@ -238,21 +343,33 @@ function compareSnapshots(baseSnapshot, targetSnapshot) {
     }
   }
 
-  const improvedRoutes = matched
-    .filter((route) => route.profitDelta > 0 || route.executionDelta > 0)
+  const classified = matched.map((route) => ({
+    ...route,
+    change: classifyRouteChange(route),
+  }));
+  const improvedRoutes = classified
+    .filter((route) => route.change === 'improved')
     .sort((left, right) => right.profitDelta - left.profitDelta || right.executionDelta - left.executionDelta);
-  const decayedRoutes = matched
-    .filter((route) => route.profitDelta < 0 || route.executionDelta < 0)
+  const decayedRoutes = classified
+    .filter((route) => route.change === 'decayed')
     .sort((left, right) => left.profitDelta - right.profitDelta || left.executionDelta - right.executionDelta);
-  const unchangedCount = matched.length - improvedRoutes.length - decayedRoutes.length;
+  const mixedRoutes = classified
+    .filter((route) => route.change === 'mixed')
+    .sort((left, right) => Math.abs(right.profitDelta) - Math.abs(left.profitDelta));
+  const unchangedCount = classified.filter((route) => route.change === 'unchanged').length;
 
   const profitDeltaTotal = matched.reduce((sum, route) => sum + route.profitDelta, 0);
   const roiDeltaTotal = matched.reduce((sum, route) => sum + route.roiDelta, 0);
 
   return {
+    compatible: true,
+    message: `Compared routes within ${baseContext.label}.`,
+    baseMarketContext: baseContext,
+    targetMarketContext: targetContext,
     overlapCount: matched.length,
     improvedCount: improvedRoutes.length,
     decayedCount: decayedRoutes.length,
+    mixedCount: mixedRoutes.length,
     unchangedCount,
     newCount: newRoutes.length,
     droppedCount: droppedRoutes.length,
@@ -260,6 +377,7 @@ function compareSnapshots(baseSnapshot, targetSnapshot) {
     averageRoiDelta: matched.length ? Number((roiDeltaTotal / matched.length).toFixed(1)) : 0,
     topImproved: improvedRoutes.slice(0, 5),
     topDecayed: decayedRoutes.slice(0, 5),
+    mixedRoutes: mixedRoutes.slice(0, 5),
     newRoutes: newRoutes.slice(0, 5),
     droppedRoutes: droppedRoutes.slice(0, 5),
   };
@@ -272,6 +390,8 @@ module.exports = {
   listSnapshotSummaries,
   getSnapshotById,
   buildSnapshotSummary,
+  buildRouteFingerprint,
+  normalizeMarketContext,
   compareSnapshots,
   attachSnapshotContext,
 };

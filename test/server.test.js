@@ -16,6 +16,8 @@ const {
   getSnapshotById,
   compareSnapshots,
   attachSnapshotContext,
+  buildRouteFingerprint,
+  normalizeMarketContext,
 } = require('../snapshot-store');
 
 function isoHoursAgo(hours) {
@@ -166,6 +168,7 @@ test('snapshot store persists summaries and full records', () => {
   assert.equal(list.length, 1);
   assert.equal(list[0].id, snapshot.id);
   assert.equal(list[0].topRoute.itemName, 'Arcane Energize');
+  assert.equal(list[0].marketContext.label, 'PC | Crossplay | EN');
 
   const loaded = getSnapshotById(snapshot.id);
   assert.equal(loaded.id, snapshot.id);
@@ -233,6 +236,72 @@ test('compareSnapshots surfaces improved, decayed, new, and dropped routes', () 
   assert.equal(comparison.droppedRoutes[0].itemName, 'Adaptation');
 });
 
+test('route fingerprints use structured variant identity instead of display labels', () => {
+  const original = {
+    item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+    variant: { rank: 5, subtype: 'maxed', label: 'Rank 5 / Maxed' },
+  };
+  const relabeled = {
+    item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+    variant: { rank: 5, subtype: 'MAXED', label: 'Fully ranked' },
+  };
+
+  assert.equal(
+    buildRouteFingerprint(original, { platform: 'PC', language: 'EN', crossplay: true }),
+    buildRouteFingerprint(relabeled, { platform: 'pc', language: 'en', crossplay: 'true' })
+  );
+  assert.notEqual(
+    buildRouteFingerprint(original, { platform: 'pc', crossplay: true }),
+    buildRouteFingerprint(original, { platform: 'xbox', crossplay: true })
+  );
+});
+
+test('compareSnapshots refuses to blend different market contexts', () => {
+  const route = {
+    item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+    variant: { rank: 5, subtype: null, label: 'Rank 5' },
+    expectedProfit: 40,
+    roiPct: 18,
+    executionScore: 70,
+    bestSell: { price: 80 },
+    buyerOptions: [{ price: 95 }],
+  };
+  const comparison = compareSnapshots(
+    { options: { platform: 'pc', language: 'en', crossplay: true }, result: [route] },
+    { options: { platform: 'xbox', language: 'en', crossplay: true }, result: [route] }
+  );
+
+  assert.equal(comparison.compatible, false);
+  assert.equal(comparison.overlapCount, 0);
+  assert.match(comparison.message, /different markets/);
+});
+
+test('compareSnapshots gives mixed routes one mutually exclusive classification', () => {
+  const baseRoute = {
+    item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+    variant: { label: 'Default' },
+    expectedProfit: 40,
+    roiPct: 18,
+    executionScore: 75,
+    bestSell: { price: 80 },
+    buyerOptions: [{ price: 95 }],
+  };
+  const targetRoute = {
+    ...baseRoute,
+    expectedProfit: 50,
+    roiPct: 21,
+    executionScore: 62,
+  };
+  const comparison = compareSnapshots({ result: [baseRoute] }, { result: [targetRoute] });
+
+  assert.equal(comparison.compatible, true);
+  assert.equal(comparison.mixedCount, 1);
+  assert.equal(comparison.improvedCount, 0);
+  assert.equal(comparison.decayedCount, 0);
+  assert.equal(comparison.unchangedCount, 0);
+  assert.equal(comparison.mixedRoutes[0].change, 'mixed');
+});
+
 test('attachSnapshotContext annotates routes with improving and new momentum', () => {
   createSnapshot('analyze', {
     analyzedAt: '2026-08-01T12:00:00.000Z',
@@ -292,4 +361,31 @@ test('attachSnapshotContext annotates routes with improving and new momentum', (
   assert.equal(annotated[1].momentum.label, 'New route');
   assert.equal(annotated[1].momentum.tone, 'new');
   assert.equal(annotated[1].momentum.seenCount, 0);
+});
+
+test('attachSnapshotContext only uses history from the current market', () => {
+  const route = {
+    item: { slug: 'arcane-energize', name: 'Arcane Energize' },
+    variant: { rank: 5, subtype: null, label: 'Rank 5' },
+    expectedProfit: 51,
+    roiPct: 21.5,
+    executionScore: 77,
+    bestSell: { price: 79 },
+    buyerOptions: [{ price: 97 }],
+  };
+  const xboxHistory = {
+    analyzedAt: '2026-08-10T12:00:00.000Z',
+    options: { platform: 'xbox', language: 'en', crossplay: true },
+    result: [{ ...route, expectedProfit: 30 }],
+  };
+  const annotated = attachSnapshotContext(
+    [route],
+    [xboxHistory],
+    { platform: 'pc', language: 'en', crossplay: true }
+  );
+
+  assert.equal(annotated[0].momentum.label, 'New route');
+  assert.equal(annotated[0].momentum.seenCount, 0);
+  assert.match(annotated[0].routeFingerprint, /^route-v2::pc::en::crossplay::/);
+  assert.equal(normalizeMarketContext({ platform: 'XBOX', crossplay: false }).label, 'Xbox | Platform only | EN');
 });
