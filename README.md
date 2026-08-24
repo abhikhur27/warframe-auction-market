@@ -21,6 +21,8 @@ This project is designed for **decision support** during manual trading, not ful
 - Current route cards now use recent snapshot history to label each line as new, improving, stable, or decaying so one lucky spread does not get mistaken for a durable market edge.
 - Snapshot momentum and comparisons use versioned route fingerprints that include market, crossplay, item, rank, and subtype identity, preventing console or variant scans from being blended into a false trend.
 - Snapshot comparisons refuse cross-market drift calculations and classify conflicting profit/ROI/execution movement as mixed instead of double-counting it as both improved and decayed.
+- Snapshot history uses a versioned on-disk schema, automatically migrates legacy array files, retains the newest 40 runs, and writes through a temporary file with a last-known-good backup.
+- If the primary snapshot file is malformed, the store quarantines it and restores the backup instead of silently replacing history with an empty list; newer unsupported schemas are left untouched.
 - Shareable URL state keeps the current watchlist and filter setup reproducible.
 - Item lookup now accepts both `/api/items` and the older `/api/items/search` path so saved scripts and README-era probes still work.
 - Power-user shortcuts: `Ctrl/Cmd+Enter` runs Analyze and `Ctrl/Cmd+Shift+Enter` runs Auto-Find.
@@ -156,6 +158,7 @@ This lowers API pressure and reduces burst failures while scanning many items.
 - Freshness filtering (`maxAgeHours`) is important because stale quotes can distort ROI.
 - Treat displayed profit as **pre-fee directional guidance**, not guaranteed realized outcome.
 - Snapshot history is stored locally in `data/session-snapshots.json` and is ignored by git.
+- The previous valid snapshot document is kept at `data/session-snapshots.json.bak`; malformed primaries are preserved as timestamped `.corrupt-*` files for manual recovery.
 - Route momentum is derived from the recent local snapshot history only; a route marked `New` can still be strong, it just lacks local replay context.
 - Only snapshots from the same platform, language, and crossplay market are comparable. Filter thresholds may differ without changing route identity.
 
@@ -179,6 +182,9 @@ Run this quick sequence after server changes:
 3. Query `GET /api/items?q=arcane` (or the legacy `/api/items/search?q=arcane` alias).
 4. Run one `POST /api/analyze` payload with 2 known items.
 5. Confirm `GET /api/snapshots?limit=3` returns the new run.
+
+For deterministic verification of migration, backup recovery, retention, and market-context compatibility, run `npm test`.
+The test suite writes only to operating-system temporary directories and never clears your local `data/` history.
 
 ## Portfolio Positioning
 

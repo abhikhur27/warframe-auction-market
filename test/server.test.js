@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const {
@@ -10,10 +11,7 @@ const {
   buildStressTest,
 } = require('../server');
 const {
-  SNAPSHOT_FILE,
-  createSnapshot,
-  listSnapshotSummaries,
-  getSnapshotById,
+  createSnapshotStore,
   compareSnapshots,
   attachSnapshotContext,
   buildRouteFingerprint,
@@ -24,9 +22,13 @@ function isoHoursAgo(hours) {
   return new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
 }
 
-test.beforeEach(() => {
-  fs.rmSync(path.dirname(SNAPSHOT_FILE), { recursive: true, force: true });
-});
+function createTestSnapshotStore(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'warframe-server-test-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return createSnapshotStore({
+    snapshotFile: path.join(root, 'session-snapshots.json'),
+  });
+}
 
 test('parseAnalysisOptions clamps and normalizes incoming values', () => {
   const options = parseAnalysisOptions({
@@ -150,8 +152,9 @@ test('getRecentCandidateItems ranks active two-sided items ahead of thin candida
   assert.equal(result[0].activeTwoSided, true);
 });
 
-test('snapshot store persists summaries and full records', () => {
-  const snapshot = createSnapshot('analyze', {
+test('snapshot store persists summaries and full records', (t) => {
+  const store = createTestSnapshotStore(t);
+  const snapshot = store.createSnapshot('analyze', {
     analyzedAt: '2026-07-29T12:00:00.000Z',
     options: { platform: 'pc' },
     requestedCount: 3,
@@ -164,19 +167,20 @@ test('snapshot store persists summaries and full records', () => {
     }],
   });
 
-  const list = listSnapshotSummaries(5);
+  const list = store.listSnapshotSummaries(5);
   assert.equal(list.length, 1);
   assert.equal(list[0].id, snapshot.id);
   assert.equal(list[0].topRoute.itemName, 'Arcane Energize');
   assert.equal(list[0].marketContext.label, 'PC | Crossplay | EN');
 
-  const loaded = getSnapshotById(snapshot.id);
+  const loaded = store.getSnapshotById(snapshot.id);
   assert.equal(loaded.id, snapshot.id);
   assert.equal(loaded.result[0].expectedProfit, 40);
 });
 
-test('compareSnapshots surfaces improved, decayed, new, and dropped routes', () => {
-  const baseSnapshot = createSnapshot('analyze', {
+test('compareSnapshots surfaces improved, decayed, new, and dropped routes', (t) => {
+  const store = createTestSnapshotStore(t);
+  const baseSnapshot = store.createSnapshot('analyze', {
     analyzedAt: '2026-08-01T12:00:00.000Z',
     result: [
       {
@@ -200,7 +204,7 @@ test('compareSnapshots surfaces improved, decayed, new, and dropped routes', () 
     ],
   });
 
-  const targetSnapshot = createSnapshot('analyze', {
+  const targetSnapshot = store.createSnapshot('analyze', {
     analyzedAt: '2026-08-04T12:00:00.000Z',
     result: [
       {
@@ -302,8 +306,9 @@ test('compareSnapshots gives mixed routes one mutually exclusive classification'
   assert.equal(comparison.mixedRoutes[0].change, 'mixed');
 });
 
-test('attachSnapshotContext annotates routes with improving and new momentum', () => {
-  createSnapshot('analyze', {
+test('attachSnapshotContext annotates routes with improving and new momentum', (t) => {
+  const store = createTestSnapshotStore(t);
+  const olderSnapshot = store.createSnapshot('analyze', {
     analyzedAt: '2026-08-01T12:00:00.000Z',
     result: [
       {
@@ -318,7 +323,7 @@ test('attachSnapshotContext annotates routes with improving and new momentum', (
     ],
   });
 
-  createSnapshot('analyze', {
+  const recentSnapshot = store.createSnapshot('analyze', {
     analyzedAt: '2026-08-03T12:00:00.000Z',
     result: [
       {
@@ -352,7 +357,7 @@ test('attachSnapshotContext annotates routes with improving and new momentum', (
       bestSell: { price: 41 },
       buyerOptions: [{ price: 47 }],
     },
-  ], [getSnapshotById(listSnapshotSummaries(2)[0].id), getSnapshotById(listSnapshotSummaries(2)[1].id)]);
+  ], [recentSnapshot, olderSnapshot]);
 
   assert.equal(annotated[0].momentum.label, 'Improving route');
   assert.equal(annotated[0].momentum.tone, 'improving');

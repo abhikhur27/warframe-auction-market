@@ -4,35 +4,221 @@ const crypto = require('crypto');
 
 const SNAPSHOT_DIR = path.join(__dirname, 'data');
 const SNAPSHOT_FILE = path.join(SNAPSHOT_DIR, 'session-snapshots.json');
+const SNAPSHOT_BACKUP_FILE = `${SNAPSHOT_FILE}.bak`;
 const MAX_SNAPSHOTS = 40;
+const STORE_SCHEMA_VERSION = 2;
+const SNAPSHOT_SCHEMA_VERSION = 2;
 const DEFAULT_MARKET_CONTEXT = Object.freeze({
   platform: 'pc',
   language: 'en',
   crossplay: true,
 });
 
-function ensureSnapshotDir() {
-  fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function readSnapshots() {
-  ensureSnapshotDir();
-  if (!fs.existsSync(SNAPSHOT_FILE)) {
-    return [];
-  }
-
-  try {
-    const raw = fs.readFileSync(SNAPSHOT_FILE, 'utf8');
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function buildMigratedSnapshotId(snapshot, index) {
+  const seed = JSON.stringify({
+    index,
+    kind: snapshot?.kind || 'analyze',
+    analyzedAt: snapshot?.analyzedAt || null,
+    result: snapshot?.result || [],
+  });
+  return `migrated-${crypto.createHash('sha256').update(seed).digest('hex').slice(0, 20)}`;
 }
 
-function writeSnapshots(snapshots) {
-  ensureSnapshotDir();
-  fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(snapshots, null, 2));
+function migrateSnapshot(snapshot, index) {
+  if (!isPlainObject(snapshot)) return null;
+
+  const options = isPlainObject(snapshot.options) ? snapshot.options : {};
+  const marketContext = normalizeMarketContext(options);
+  return {
+    ...snapshot,
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    id: typeof snapshot.id === 'string' && snapshot.id.trim()
+      ? snapshot.id
+      : buildMigratedSnapshotId(snapshot, index),
+    kind: snapshot.kind === 'auto-find' ? 'auto-find' : 'analyze',
+    analyzedAt: typeof snapshot.analyzedAt === 'string'
+      ? snapshot.analyzedAt
+      : new Date(0).toISOString(),
+    options: {
+      ...options,
+      platform: marketContext.platform,
+      language: marketContext.language,
+      crossplay: marketContext.crossplay,
+    },
+    unresolved: Array.isArray(snapshot.unresolved) ? snapshot.unresolved : [],
+    errors: Array.isArray(snapshot.errors) ? snapshot.errors : [],
+    result: Array.isArray(snapshot.result) ? snapshot.result : [],
+  };
+}
+
+function decodeSnapshotStore(parsed, maxSnapshots) {
+  let sourceVersion = 0;
+  let rawSnapshots;
+
+  if (Array.isArray(parsed)) {
+    rawSnapshots = parsed;
+  } else if (isPlainObject(parsed) && Array.isArray(parsed.snapshots)) {
+    sourceVersion = Number(parsed.schemaVersion || 1);
+    if (sourceVersion > STORE_SCHEMA_VERSION) {
+      const error = new Error(`Snapshot store schema ${sourceVersion} is newer than supported schema ${STORE_SCHEMA_VERSION}.`);
+      error.code = 'UNSUPPORTED_SNAPSHOT_SCHEMA';
+      throw error;
+    }
+    rawSnapshots = parsed.snapshots;
+  } else {
+    throw new Error('Snapshot store must be an array or a versioned object with a snapshots array.');
+  }
+
+  const snapshots = rawSnapshots
+    .map(migrateSnapshot)
+    .filter(Boolean)
+    .slice(0, maxSnapshots);
+  const changed = sourceVersion !== STORE_SCHEMA_VERSION
+    || snapshots.length !== rawSnapshots.length
+    || snapshots.some((snapshot, index) => JSON.stringify(snapshot) !== JSON.stringify(rawSnapshots[index]));
+
+  return {
+    changed,
+    store: {
+      schemaVersion: STORE_SCHEMA_VERSION,
+      updatedAt: isPlainObject(parsed) && typeof parsed.updatedAt === 'string'
+        ? parsed.updatedAt
+        : null,
+      snapshots,
+    },
+  };
+}
+
+function createSnapshotStore({
+  snapshotFile = SNAPSHOT_FILE,
+  maxSnapshots = MAX_SNAPSHOTS,
+  now = () => new Date(),
+  idFactory = () => crypto.randomUUID(),
+} = {}) {
+  const backupFile = `${snapshotFile}.bak`;
+
+  function ensureSnapshotDir() {
+    fs.mkdirSync(path.dirname(snapshotFile), { recursive: true });
+  }
+
+  function writeStore(store, { preservePrimary = true } = {}) {
+    ensureSnapshotDir();
+    const tempFile = `${snapshotFile}.${process.pid}.${crypto.randomUUID()}.tmp`;
+    const serialized = `${JSON.stringify(store, null, 2)}\n`;
+
+    try {
+      fs.writeFileSync(tempFile, serialized, 'utf8');
+      if (preservePrimary && fs.existsSync(snapshotFile)) {
+        fs.copyFileSync(snapshotFile, backupFile);
+      }
+      fs.renameSync(tempFile, snapshotFile);
+    } finally {
+      if (fs.existsSync(tempFile)) fs.rmSync(tempFile, { force: true });
+    }
+  }
+
+  function quarantineCorruptPrimary() {
+    if (!fs.existsSync(snapshotFile)) return null;
+    const timestamp = now().toISOString().replace(/[:.]/g, '-');
+    let quarantineFile = `${snapshotFile}.corrupt-${timestamp}`;
+    let suffix = 1;
+    while (fs.existsSync(quarantineFile)) {
+      quarantineFile = `${snapshotFile}.corrupt-${timestamp}-${suffix}`;
+      suffix += 1;
+    }
+    fs.renameSync(snapshotFile, quarantineFile);
+    return quarantineFile;
+  }
+
+  function readDecoded(file) {
+    return decodeSnapshotStore(JSON.parse(fs.readFileSync(file, 'utf8')), maxSnapshots);
+  }
+
+  function readStore() {
+    ensureSnapshotDir();
+    if (!fs.existsSync(snapshotFile)) {
+      return { schemaVersion: STORE_SCHEMA_VERSION, updatedAt: null, snapshots: [] };
+    }
+
+    try {
+      const decoded = readDecoded(snapshotFile);
+      if (decoded.changed) {
+        writeStore({ ...decoded.store, updatedAt: now().toISOString() });
+      }
+      return decoded.store;
+    } catch (primaryError) {
+      if (primaryError.code === 'UNSUPPORTED_SNAPSHOT_SCHEMA') throw primaryError;
+
+      if (fs.existsSync(backupFile)) {
+        try {
+          const recovered = readDecoded(backupFile).store;
+          quarantineCorruptPrimary();
+          const repaired = { ...recovered, updatedAt: now().toISOString() };
+          writeStore(repaired, { preservePrimary: false });
+          return repaired;
+        } catch (backupError) {
+          if (backupError.code === 'UNSUPPORTED_SNAPSHOT_SCHEMA') throw backupError;
+        }
+      }
+
+      quarantineCorruptPrimary();
+      return { schemaVersion: STORE_SCHEMA_VERSION, updatedAt: null, snapshots: [] };
+    }
+  }
+
+  function createSnapshot(kind, payload = {}) {
+    const result = Array.isArray(payload.result) ? payload.result : [];
+    const marketContext = normalizeMarketContext(payload.options);
+    const snapshot = migrateSnapshot({
+      id: idFactory(),
+      kind,
+      analyzedAt: payload.analyzedAt || now().toISOString(),
+      options: {
+        ...(isPlainObject(payload.options) ? payload.options : {}),
+        platform: marketContext.platform,
+        language: marketContext.language,
+        crossplay: marketContext.crossplay,
+      },
+      requestedCount: payload.requestedCount ?? null,
+      resolvedCount: payload.resolvedCount ?? null,
+      unresolved: Array.isArray(payload.unresolved) ? payload.unresolved : [],
+      scannedCount: payload.scannedCount ?? null,
+      candidateCount: payload.candidateCount ?? null,
+      analysisBudget: payload.analysisBudget ?? null,
+      errors: Array.isArray(payload.errors) ? payload.errors : [],
+      result,
+    }, 0);
+
+    const store = readStore();
+    const nextStore = {
+      schemaVersion: STORE_SCHEMA_VERSION,
+      updatedAt: now().toISOString(),
+      snapshots: [snapshot, ...store.snapshots].slice(0, maxSnapshots),
+    };
+    writeStore(nextStore);
+    return snapshot;
+  }
+
+  function listSnapshotSummaries(limit = 12) {
+    const safeLimit = Math.max(1, Math.min(Number(limit) || 12, maxSnapshots));
+    return readStore().snapshots.slice(0, safeLimit).map(buildSnapshotSummary);
+  }
+
+  function getSnapshotById(id) {
+    return readStore().snapshots.find((snapshot) => snapshot.id === id) || null;
+  }
+
+  return {
+    snapshotFile,
+    backupFile,
+    createSnapshot,
+    listSnapshotSummaries,
+    getSnapshotById,
+  };
 }
 
 function normalizeBoolean(value, fallback) {
@@ -104,37 +290,10 @@ function buildSnapshotSummary(snapshot) {
   };
 }
 
-function createSnapshot(kind, payload) {
-  const result = Array.isArray(payload.result) ? payload.result : [];
-  const snapshot = {
-    id: crypto.randomUUID(),
-    kind,
-    analyzedAt: payload.analyzedAt || new Date().toISOString(),
-    options: payload.options || {},
-    requestedCount: payload.requestedCount ?? null,
-    resolvedCount: payload.resolvedCount ?? null,
-    unresolved: Array.isArray(payload.unresolved) ? payload.unresolved : [],
-    scannedCount: payload.scannedCount ?? null,
-    candidateCount: payload.candidateCount ?? null,
-    analysisBudget: payload.analysisBudget ?? null,
-    errors: Array.isArray(payload.errors) ? payload.errors : [],
-    result,
-  };
-
-  const snapshots = readSnapshots();
-  snapshots.unshift(snapshot);
-  writeSnapshots(snapshots.slice(0, MAX_SNAPSHOTS));
-  return snapshot;
-}
-
-function listSnapshotSummaries(limit = 12) {
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 12, MAX_SNAPSHOTS));
-  return readSnapshots().slice(0, safeLimit).map(buildSnapshotSummary);
-}
-
-function getSnapshotById(id) {
-  return readSnapshots().find((snapshot) => snapshot.id === id) || null;
-}
+const defaultSnapshotStore = createSnapshotStore();
+const createSnapshot = defaultSnapshotStore.createSnapshot;
+const listSnapshotSummaries = defaultSnapshotStore.listSnapshotSummaries;
+const getSnapshotById = defaultSnapshotStore.getSnapshotById;
 
 function summarizeRoute(row, options = {}) {
   const topBuyer = Array.isArray(row?.buyerOptions) ? row.buyerOptions[0] : null;
@@ -385,7 +544,11 @@ function compareSnapshots(baseSnapshot, targetSnapshot) {
 
 module.exports = {
   SNAPSHOT_FILE,
+  SNAPSHOT_BACKUP_FILE,
   MAX_SNAPSHOTS,
+  STORE_SCHEMA_VERSION,
+  SNAPSHOT_SCHEMA_VERSION,
+  createSnapshotStore,
   createSnapshot,
   listSnapshotSummaries,
   getSnapshotById,

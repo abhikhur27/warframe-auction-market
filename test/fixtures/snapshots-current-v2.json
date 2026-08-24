@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "updatedAt": "2026-08-16T12:05:00.000Z",
+  "snapshots": [
+    {
+      "schemaVersion": 2,
+      "id": "fixture-xbox-current",
+      "kind": "auto-find",
+      "analyzedAt": "2026-08-16T12:00:00.000Z",
+      "options": {
+        "platform": "xbox",
+        "language": "en",
+        "crossplay": false,
+        "minSpread": 10
+      },
+      "requestedCount": null,
+      "resolvedCount": null,
+      "unresolved": [],
+      "scannedCount": 12,
+      "candidateCount": 20,
+      "analysisBudget": 12,
+      "errors": [],
+      "result": [
+        {
+          "item": {
+            "slug": "blind-rage",
+            "name": "Blind Rage"
+          },
+          "variant": {
+            "rank": 10,
+            "subtype": null,
+            "label": "Rank 10"
+          },
+          "expectedProfit": 31,
+          "roiPct": 16.5
+        }
+      ]
+    }
+  ]
+}
