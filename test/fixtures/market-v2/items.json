@@ -1,0 +1,33 @@
+{
+  "apiVersion": "2.0",
+  "data": [
+    {
+      "id": "arcane-item-id",
+      "slug": "arcane_energize",
+      "gameRef": "/Lotus/Types/Game/Mods/Arcane/ArcaneEnergize",
+      "tags": ["arcane", "legendary"],
+      "i18n": {
+        "en": { "name": "Arcane Energize" }
+      }
+    },
+    {
+      "id": "adaptation-item-id",
+      "slug": "adaptation",
+      "gameRef": "/Lotus/Upgrades/Mods/Warframe/AvatarResistanceOnDamageMod",
+      "tags": ["mod", "rare"],
+      "i18n": {
+        "en": { "name": "Adaptation" }
+      }
+    },
+    {
+      "id": "blind-rage-item-id",
+      "slug": "blind_rage",
+      "gameRef": "/Lotus/Upgrades/Mods/Warframe/Expert/AvatarAbilityEfficiencyExpertMod",
+      "tags": ["mod", "corrupted"],
+      "i18n": {
+        "en": { "name": "Blind Rage" }
+      }
+    }
+  ],
+  "error": null
+}

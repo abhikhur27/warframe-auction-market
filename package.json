@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test"
+    "check": "node --check server.js && node --check snapshot-store.js && node --check market-api-client.js && node --check public/app.js",
+    "test": "node --test",
+    "ci": "npm run check && npm test"
   },
   "keywords": [],
   "author": "",

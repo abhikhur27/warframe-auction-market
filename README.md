@@ -31,6 +31,9 @@ This project is designed for **decision support** during manual trading, not ful
 - Filters can now require minimum fallback profit so brittle top-of-book routes do not outrank routes with real backup depth.
 - Filters can require a minimum number of buy and sell offers so one-off spikes do not masquerade as liquid opportunities.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
+- The upstream client now enforces a 12-second timeout, retries rate limits and transient 5xx responses, validates the v2 data envelope, and exposes request/retry/failure counters through `/healthz`.
+- Sanitized Warframe Market v2 contract fixtures keep catalog, recent-order, and item-order analysis reproducible without depending on live prices or network availability.
+- GitHub Actions runs syntax checks and the full offline suite on Node 20 and Node 22.
 
 ## Stack
 
@@ -55,9 +58,13 @@ Open [http://localhost:3000](http://localhost:3000).
 │   ├── index.html      # UI shell
 │   ├── styles.css      # Dashboard styling
 │   └── app.js          # Client behavior and API calls
+├── test/
+│   └── fixtures/       # Sanitized API and snapshot compatibility contracts
 ├── scripts/
 │   └── ensure-warframe-flip-finder.ps1  # Optional keep-alive/autostart setup
-├── server.js           # API orchestration, scoring, filtering
+├── market-api-client.js # Bounded, retrying Warframe Market client
+├── snapshot-store.js    # Versioned local scan history
+├── server.js            # API orchestration, scoring, filtering
 └── README.md
 ```
 
@@ -144,6 +151,8 @@ The server intentionally throttles external calls:
 
 - max concurrent requests: `3`
 - per-request delay: `360ms`
+- request timeout: `12s`
+- maximum attempts for rate limits, network failures, and transient server errors: `3`
 
 Health telemetry endpoint:
 
@@ -183,11 +192,13 @@ Run this quick sequence after server changes:
 4. Run one `POST /api/analyze` payload with 2 known items.
 5. Confirm `GET /api/snapshots?limit=3` returns the new run.
 
-For deterministic verification of migration, backup recovery, retention, and market-context compatibility, run `npm test`.
+For deterministic verification of the external API contract, scoring pipeline, migration, backup recovery, retention, and market-context compatibility, run `npm run ci`.
 The test suite writes only to operating-system temporary directories and never clears your local `data/` history.
+
+The checked-in API fixtures mirror only the fields this app consumes. They were validated against the live v2 response shape on 2026-08-30, then reduced to synthetic names/prices so CI remains stable and no complete market response or user history is committed.
 
 ## Portfolio Positioning
 
 - Project type: Node.js + Express web app
-- Verification path: npm install && npm start, then hit `/health`, test `/api/analyze`, and confirm snapshot history loads.
+- Verification path: `npm ci && npm run ci`, then `npm start`, hit `/healthz`, test `/api/analyze`, and confirm snapshot history loads.
 

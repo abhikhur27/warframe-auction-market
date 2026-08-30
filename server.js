@@ -1,6 +1,11 @@
 const express = require('express');
 const path = require('path');
 const {
+  DEFAULT_PLATFORM,
+  DEFAULT_LANGUAGE,
+  createMarketApiClient,
+} = require('./market-api-client');
+const {
   createSnapshot,
   listSnapshotSummaries,
   getSnapshotById,
@@ -9,12 +14,8 @@ const {
   attachSnapshotContext,
 } = require('./snapshot-store');
 
-const API_BASE = 'https://api.warframe.market/v2';
-const DEFAULT_PLATFORM = 'pc';
-const DEFAULT_LANGUAGE = 'en';
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
-const REQUEST_DELAY_MS = 360;
-const MAX_CONCURRENT_REQUESTS = 3;
+const marketApi = createMarketApiClient();
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
@@ -28,15 +29,6 @@ const itemCache = {
   byId: new Map(),
 };
 
-const requestQueue = {
-  active: 0,
-  pending: [],
-};
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 function toBoolean(value, fallback = true) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') {
@@ -44,49 +36,6 @@ function toBoolean(value, fallback = true) {
     if (value.toLowerCase() === 'false') return false;
   }
   return fallback;
-}
-
-async function runLimited(task) {
-  if (requestQueue.active >= MAX_CONCURRENT_REQUESTS) {
-    await new Promise((resolve) => requestQueue.pending.push(resolve));
-  }
-
-  requestQueue.active += 1;
-  try {
-    return await task();
-  } finally {
-    requestQueue.active -= 1;
-    const next = requestQueue.pending.shift();
-    if (next) next();
-  }
-}
-
-async function apiGet(pathname, options = {}) {
-  const platform = options.platform || DEFAULT_PLATFORM;
-  const language = options.language || DEFAULT_LANGUAGE;
-  const crossplay = toBoolean(options.crossplay, true);
-
-  return runLimited(async () => {
-    await sleep(REQUEST_DELAY_MS);
-
-    const response = await fetch(`${API_BASE}${pathname}`, {
-      headers: {
-        platform,
-        language,
-        crossplay: String(crossplay),
-      },
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      const err = new Error(`API ${response.status}: ${text.slice(0, 200)}`);
-      err.status = response.status;
-      throw err;
-    }
-
-    const body = await response.json();
-    return body.data;
-  });
 }
 
 function normalizeItem(raw) {
@@ -107,7 +56,7 @@ async function ensureItemsLoaded(force = false) {
     return itemCache.items;
   }
 
-  const rawItems = await apiGet('/items');
+  const rawItems = await marketApi.get('/items');
   const items = rawItems.map(normalizeItem);
   items.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -527,7 +476,7 @@ function parseAnalysisOptions(body = {}) {
 async function analyzeResolvedItems(resolved, options) {
   const tasks = resolved.map(async (item) => {
     try {
-      const orders = await apiGet(`/orders/item/${encodeURIComponent(item.slug)}`, {
+      const orders = await marketApi.get(`/orders/item/${encodeURIComponent(item.slug)}`, {
         platform: options.platform,
         language: options.language,
         crossplay: options.crossplay,
@@ -700,7 +649,7 @@ app.post('/api/auto-find', async (req, res) => {
       ? Math.min(Math.max(Number(body.maxResults), 1), 100)
       : 25;
 
-    const recentOrders = await apiGet('/orders/recent', {
+    const recentOrders = await marketApi.get('/orders/recent', {
       platform: options.platform,
       language: options.language,
       crossplay: options.crossplay,
@@ -758,12 +707,12 @@ app.get('/api/snapshots/:id', (req, res) => {
 });
 
 app.get('/healthz', (req, res) => {
+  const telemetry = marketApi.getTelemetry();
   res.json({
     ok: true,
     cacheLoaded: itemCache.items.length > 0,
     cacheAgeMs: itemCache.loadedAt ? Date.now() - itemCache.loadedAt : null,
-    queueDepth: requestQueue.pending.length,
-    activeRequests: requestQueue.active,
+    ...telemetry,
     timestamp: new Date().toISOString(),
   });
 });
@@ -784,5 +733,6 @@ module.exports = {
   buildStressTest,
   formatVariantLabel,
   getHighOutlierFence,
+  normalizeItem,
   compareSnapshots,
 };

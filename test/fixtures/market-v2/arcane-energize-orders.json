@@ -1,0 +1,84 @@
+{
+  "apiVersion": "2.0",
+  "data": [
+    {
+      "id": "arcane-sell-1",
+      "type": "sell",
+      "platinum": 80,
+      "quantity": 2,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T12:00:00.000Z",
+      "updatedAt": "2026-08-30T16:00:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "FixtureSellerA", "reputation": 18, "status": "ingame" }
+    },
+    {
+      "id": "arcane-sell-2",
+      "type": "sell",
+      "platinum": 82,
+      "quantity": 2,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T12:30:00.000Z",
+      "updatedAt": "2026-08-30T15:30:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "FixtureSellerB", "reputation": 12, "status": "online" }
+    },
+    {
+      "id": "arcane-buy-1",
+      "type": "buy",
+      "platinum": 95,
+      "quantity": 2,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T13:00:00.000Z",
+      "updatedAt": "2026-08-30T16:05:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "FixtureBuyerA", "reputation": 24, "status": "ingame" }
+    },
+    {
+      "id": "arcane-buy-2",
+      "type": "buy",
+      "platinum": 94,
+      "quantity": 2,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T13:30:00.000Z",
+      "updatedAt": "2026-08-30T15:45:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "FixtureBuyerB", "reputation": 20, "status": "online" }
+    },
+    {
+      "id": "arcane-buy-3",
+      "type": "buy",
+      "platinum": 93,
+      "quantity": 1,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T14:00:00.000Z",
+      "updatedAt": "2026-08-30T15:15:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "FixtureBuyerC", "reputation": 16, "status": "online" }
+    },
+    {
+      "id": "arcane-offline-buy",
+      "type": "buy",
+      "platinum": 110,
+      "quantity": 5,
+      "perTrade": 1,
+      "rank": 5,
+      "visible": true,
+      "createdAt": "2026-08-29T14:30:00.000Z",
+      "updatedAt": "2026-08-30T15:00:00.000Z",
+      "itemId": "arcane-item-id",
+      "user": { "ingameName": "OfflineBuyer", "reputation": 30, "status": "offline" }
+    }
+  ],
+  "error": null
+}
