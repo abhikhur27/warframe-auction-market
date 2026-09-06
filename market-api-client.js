@@ -36,6 +36,15 @@ function makeApiError(message, details = {}) {
   return error;
 }
 
+function summarizeResponseError(value) {
+  if (typeof value === 'string') return value.slice(0, 200);
+  try {
+    return JSON.stringify(value).slice(0, 200);
+  } catch {
+    return String(value).slice(0, 200);
+  }
+}
+
 function createMarketApiClient(options = {}) {
   const baseUrl = String(options.baseUrl || DEFAULT_API_BASE).replace(/\/$/, '');
   const fetchImpl = options.fetchImpl || globalThis.fetch;
@@ -140,17 +149,17 @@ function createMarketApiClient(options = {}) {
       });
     }
 
+    if (body && typeof body === 'object' && body.error) {
+      state.failures += 1;
+      throw makeApiError(`Warframe Market API error: ${summarizeResponseError(body.error)}`, {
+        code: 'MARKET_API_RESPONSE_ERROR',
+      });
+    }
+
     if (!body || typeof body !== 'object' || !Object.hasOwn(body, 'data')) {
       state.failures += 1;
       throw makeApiError('Warframe Market response is missing the data envelope.', {
         code: 'MARKET_API_INVALID_ENVELOPE',
-      });
-    }
-
-    if (body.error) {
-      state.failures += 1;
-      throw makeApiError(`Warframe Market API error: ${String(body.error).slice(0, 200)}`, {
-        code: 'MARKET_API_RESPONSE_ERROR',
       });
     }
 
@@ -161,6 +170,17 @@ function createMarketApiClient(options = {}) {
     () => fetchAttempt(pathname, requestOptions, 1)
   );
 
+  const getCollection = async (pathname, requestOptions = {}) => {
+    const data = await get(pathname, requestOptions);
+    if (!Array.isArray(data)) {
+      state.failures += 1;
+      throw makeApiError(`Warframe Market response for ${pathname} did not contain a data array.`, {
+        code: 'MARKET_API_INVALID_DATA',
+      });
+    }
+    return data;
+  };
+
   const getTelemetry = () => ({
     activeRequests: state.active,
     queueDepth: state.pending.length,
@@ -169,7 +189,7 @@ function createMarketApiClient(options = {}) {
     failures: state.failures,
   });
 
-  return { get, getTelemetry };
+  return { get, getCollection, getTelemetry };
 }
 
 module.exports = {

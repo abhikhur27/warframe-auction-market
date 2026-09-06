@@ -31,8 +31,9 @@ This project is designed for **decision support** during manual trading, not ful
 - Filters can now require minimum fallback profit so brittle top-of-book routes do not outrank routes with real backup depth.
 - Filters can require a minimum number of buy and sell offers so one-off spikes do not masquerade as liquid opportunities.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
-- The upstream client now enforces a 12-second timeout, retries rate limits and transient 5xx responses, validates the v2 data envelope, and exposes request/retry/failure counters through `/healthz`.
-- Sanitized Warframe Market v2 contract fixtures keep catalog, recent-order, and item-order analysis reproducible without depending on live prices or network availability.
+- The upstream client now enforces a 12-second timeout, retries rate limits and transient 5xx responses, validates both the v2 envelope and collection payload shape, and exposes request/retry/failure counters through `/healthz`.
+- Sanitized Warframe Market v2 contract fixtures keep catalog, recent-order, item-order, schema-drift, and upstream-error behavior reproducible without depending on live prices or network availability.
+- The offline contract now runs through the complete Express analyze and auto-find routes, reads persisted snapshots back through HTTP, preserves item-level failure codes on partial scans, and proves fatal upstream failures return `502` without archiving a misleading result.
 - GitHub Actions runs syntax checks and the full offline suite on Node 20 and Node 22.
 
 ## Stack
@@ -192,10 +193,10 @@ Run this quick sequence after server changes:
 4. Run one `POST /api/analyze` payload with 2 known items.
 5. Confirm `GET /api/snapshots?limit=3` returns the new run.
 
-For deterministic verification of the external API contract, scoring pipeline, migration, backup recovery, retention, and market-context compatibility, run `npm run ci`.
+For deterministic verification of the external API contract, complete Express routes, scoring pipeline, snapshot read-back, migration, backup recovery, retention, and market-context compatibility, run `npm run ci`.
 The test suite writes only to operating-system temporary directories and never clears your local `data/` history.
 
-The checked-in API fixtures mirror only the fields this app consumes. They were validated against the live v2 response shape on 2026-08-30, then reduced to synthetic names/prices so CI remains stable and no complete market response or user history is committed.
+The checked-in success fixtures mirror only the fields this app consumes. They were validated against the live v2 response shape on 2026-08-30, then reduced to synthetic names/prices so CI remains stable and no complete market response or user history is committed. Deliberately invalid fixtures cover missing envelopes, non-array collection data, and structured upstream errors.
 
 ## Portfolio Positioning
 

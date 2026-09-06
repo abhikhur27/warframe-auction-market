@@ -127,12 +127,41 @@ test('rejects a successful response when the upstream data envelope drifts', asy
   const client = createMarketApiClient({
     requestDelayMs: 0,
     maxAttempts: 1,
-    fetchImpl: async () => response({ apiVersion: '3.0', items: [] }),
+    fetchImpl: async () => response(readFixture('invalid-envelope.json')),
   });
 
   await assert.rejects(
     client.get('/items'),
     (error) => error.code === 'MARKET_API_INVALID_ENVELOPE'
+  );
+  assert.equal(client.getTelemetry().failures, 1);
+});
+
+test('rejects collection endpoints whose data payload is not an array', async () => {
+  const client = createMarketApiClient({
+    requestDelayMs: 0,
+    maxAttempts: 1,
+    fetchImpl: async () => response(readFixture('invalid-collection.json')),
+  });
+
+  await assert.rejects(
+    client.getCollection('/orders/recent'),
+    (error) => error.code === 'MARKET_API_INVALID_DATA'
+  );
+  assert.equal(client.getTelemetry().failures, 1);
+});
+
+test('preserves structured upstream errors as bounded response failures', async () => {
+  const client = createMarketApiClient({
+    requestDelayMs: 0,
+    maxAttempts: 1,
+    fetchImpl: async () => response(readFixture('response-error.json')),
+  });
+
+  await assert.rejects(
+    client.get('/orders/recent'),
+    (error) => error.code === 'MARKET_API_RESPONSE_ERROR'
+      && error.message.includes('fixture_maintenance')
   );
   assert.equal(client.getTelemetry().failures, 1);
 });

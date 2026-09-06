@@ -6,28 +6,11 @@ const {
   createMarketApiClient,
 } = require('./market-api-client');
 const {
-  createSnapshot,
-  listSnapshotSummaries,
-  getSnapshotById,
   compareSnapshots,
-  buildSnapshotSummary,
-  attachSnapshotContext,
 } = require('./snapshot-store');
+const defaultSnapshotStore = require('./snapshot-store');
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
-const marketApi = createMarketApiClient();
-
-const app = express();
-app.use(express.json({ limit: '1mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-const itemCache = {
-  loadedAt: 0,
-  items: [],
-  bySlug: new Map(),
-  byName: new Map(),
-  byId: new Map(),
-};
 
 function toBoolean(value, fallback = true) {
   if (typeof value === 'boolean') return value;
@@ -50,13 +33,14 @@ function normalizeItem(raw) {
   };
 }
 
-async function ensureItemsLoaded(force = false) {
-  const stale = Date.now() - itemCache.loadedAt > CACHE_TTL_MS;
+async function ensureItemsLoaded(runtime, force = false) {
+  const { marketApi, itemCache, nowMs } = runtime;
+  const stale = nowMs() - itemCache.loadedAt > CACHE_TTL_MS;
   if (!force && itemCache.items.length > 0 && !stale) {
     return itemCache.items;
   }
 
-  const rawItems = await marketApi.get('/items');
+  const rawItems = await marketApi.getCollection('/items');
   const items = rawItems.map(normalizeItem);
   items.sort((a, b) => a.name.localeCompare(b.name));
 
@@ -74,12 +58,12 @@ async function ensureItemsLoaded(force = false) {
   itemCache.bySlug = bySlug;
   itemCache.byName = byName;
   itemCache.byId = byId;
-  itemCache.loadedAt = Date.now();
+  itemCache.loadedAt = nowMs();
 
   return items;
 }
 
-function searchItems(query, limit = 12) {
+function searchItems(itemCache, query, limit = 12) {
   const normalizedQuery = (query || '').trim().toLowerCase();
   if (!normalizedQuery) return [];
 
@@ -109,7 +93,7 @@ function searchItems(query, limit = 12) {
   return [...exact, ...startsWith, ...contains].slice(0, limit);
 }
 
-function resolveItems(identifiers) {
+function resolveItems(itemCache, identifiers) {
   const resolved = [];
   const unresolved = [];
   const seen = new Set();
@@ -122,7 +106,7 @@ function resolveItems(identifiers) {
     let match = itemCache.bySlug.get(lower) || itemCache.byName.get(lower);
 
     if (!match) {
-      const fuzzy = searchItems(term, 1);
+      const fuzzy = searchItems(itemCache, term, 1);
       if (fuzzy.length === 1) {
         match = fuzzy[0];
       }
@@ -473,18 +457,25 @@ function parseAnalysisOptions(body = {}) {
   };
 }
 
-async function analyzeResolvedItems(resolved, options) {
+async function analyzeResolvedItems(marketApi, resolved, options) {
   const tasks = resolved.map(async (item) => {
     try {
-      const orders = await marketApi.get(`/orders/item/${encodeURIComponent(item.slug)}`, {
+      const orders = await marketApi.getCollection(`/orders/item/${encodeURIComponent(item.slug)}`, {
         platform: options.platform,
         language: options.language,
         crossplay: options.crossplay,
       });
-      const analyzed = analyzeSingleItem(item, Array.isArray(orders) ? orders : [], options);
+      const analyzed = analyzeSingleItem(item, orders, options);
       return { analyzed, error: null };
     } catch (error) {
-      return { analyzed: null, error: { item: item.slug, error: error.message || 'Unknown error' } };
+      return {
+        analyzed: null,
+        error: {
+          item: item.slug,
+          error: error.message || 'Unknown error',
+          code: error.code || 'ITEM_ANALYSIS_FAILED',
+        },
+      };
     }
   });
 
@@ -500,15 +491,16 @@ async function analyzeResolvedItems(resolved, options) {
   return { result, errors };
 }
 
-function enrichResultRowsWithSnapshotContext(rows, options) {
-  return attachSnapshotContext(
+function enrichResultRowsWithSnapshotContext(snapshotStore, rows, options) {
+  return snapshotStore.attachSnapshotContext(
     rows,
-    listSnapshotSummaries(8).map((summary) => getSnapshotById(summary.id)),
+    snapshotStore.listSnapshotSummaries(8)
+      .map((summary) => snapshotStore.getSnapshotById(summary.id)),
     options
   );
 }
 
-function getRecentCandidateItems(recentOrders, options, itemLookup = itemCache.byId) {
+function getRecentCandidateItems(recentOrders, options, itemLookup = new Map()) {
   const statusSet = new Set(options.statuses);
   const minReputation = options.minReputation;
   const maxAgeHours = options.maxAgeHours;
@@ -578,144 +570,178 @@ function getRecentCandidateItems(recentOrders, options, itemLookup = itemCache.b
   return [...prioritized, ...fallback];
 }
 
-app.get('/api/health', async (_req, res) => {
-  res.json({ ok: true, now: new Date().toISOString() });
-});
+function createApp(dependencies = {}) {
+  const marketApi = dependencies.marketApi || createMarketApiClient();
+  const snapshotStore = {
+    ...defaultSnapshotStore,
+    ...(dependencies.snapshotStore || {}),
+  };
+  const now = dependencies.now || (() => new Date());
+  const nowMs = () => now().getTime();
+  const itemCache = {
+    loadedAt: 0,
+    items: [],
+    bySlug: new Map(),
+    byName: new Map(),
+    byId: new Map(),
+  };
+  const runtime = { marketApi, itemCache, nowMs };
+  const app = express();
 
-async function handleItemsLookup(req, res) {
-  try {
-    await ensureItemsLoaded();
-    const q = String(req.query.q || '').trim();
-    if (!q) {
-      return res.json({ items: itemCache.items.slice(0, 20) });
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.static(dependencies.publicDir || path.join(__dirname, 'public')));
+
+  function sendServerError(res, error, fallback = 'Unknown server error') {
+    const isUpstreamFailure = String(error?.code || '').startsWith('MARKET_API_');
+    return res.status(isUpstreamFailure ? 502 : 500).json({
+      error: error?.message || fallback,
+      code: error?.code || 'SERVER_ERROR',
+    });
+  }
+
+  app.get('/api/health', async (_req, res) => {
+    res.json({ ok: true, now: now().toISOString() });
+  });
+
+  async function handleItemsLookup(req, res) {
+    try {
+      await ensureItemsLoaded(runtime);
+      const q = String(req.query.q || '').trim();
+      if (!q) {
+        return res.json({ items: itemCache.items.slice(0, 20) });
+      }
+
+      const limit = Number(req.query.limit || 12);
+      const items = searchItems(itemCache, q, Math.max(1, Math.min(limit, 30)));
+      return res.json({ items });
+    } catch (error) {
+      return sendServerError(res, error, 'Failed to load items');
+    }
+  }
+
+  app.get('/api/items', handleItemsLookup);
+  app.get('/api/items/search', handleItemsLookup);
+
+  app.post('/api/analyze', async (req, res) => {
+    try {
+      await ensureItemsLoaded(runtime);
+
+      const body = req.body || {};
+      const rawItems = Array.isArray(body.items) ? body.items : [];
+
+      if (rawItems.length === 0) {
+        return res.status(400).json({ error: 'Please provide at least one item name or slug.' });
+      }
+
+      const { resolved, unresolved } = resolveItems(itemCache, rawItems);
+      if (resolved.length === 0) {
+        return res.status(400).json({ error: 'No valid items were found.', unresolved });
+      }
+
+      const options = parseAnalysisOptions(body);
+      const { result, errors } = await analyzeResolvedItems(marketApi, resolved, options);
+      const enrichedResult = enrichResultRowsWithSnapshotContext(snapshotStore, result, options);
+      const payload = {
+        analyzedAt: now().toISOString(),
+        options,
+        requestedCount: rawItems.length,
+        resolvedCount: resolved.length,
+        unresolved,
+        result: enrichedResult,
+        errors,
+      };
+      const snapshot = snapshotStore.createSnapshot('analyze', payload);
+      return res.json({
+        ...payload,
+        snapshotId: snapshot.id,
+      });
+    } catch (error) {
+      return sendServerError(res, error);
+    }
+  });
+
+  app.post('/api/auto-find', async (req, res) => {
+    try {
+      await ensureItemsLoaded(runtime);
+
+      const body = req.body || {};
+      const options = parseAnalysisOptions(body);
+      const maxResults = Number.isFinite(Number(body.maxResults))
+        ? Math.min(Math.max(Number(body.maxResults), 1), 100)
+        : 25;
+
+      const recentOrders = await marketApi.getCollection('/orders/recent', {
+        platform: options.platform,
+        language: options.language,
+        crossplay: options.crossplay,
+      });
+
+      const candidates = getRecentCandidateItems(recentOrders, options, itemCache.byId);
+      const analysisBudget = Math.min(candidates.length, Math.max(maxResults * 3, 30));
+      const selected = candidates.slice(0, analysisBudget).map((x) => x.item);
+      const { result, errors } = await analyzeResolvedItems(marketApi, selected, options);
+      const enrichedResult = enrichResultRowsWithSnapshotContext(snapshotStore, result, options);
+      const payload = {
+        analyzedAt: now().toISOString(),
+        options,
+        scannedCount: selected.length,
+        candidateCount: candidates.length,
+        analysisBudget,
+        result: enrichedResult.slice(0, maxResults),
+        errors,
+      };
+      const snapshot = snapshotStore.createSnapshot('auto-find', payload);
+      return res.json({
+        ...payload,
+        snapshotId: snapshot.id,
+      });
+    } catch (error) {
+      return sendServerError(res, error);
+    }
+  });
+
+  app.get('/api/snapshots', (req, res) => {
+    const limit = Number(req.query.limit || 12);
+    return res.json({ snapshots: snapshotStore.listSnapshotSummaries(limit) });
+  });
+
+  app.get('/api/snapshots/compare/:baseId/:targetId', (req, res) => {
+    const baseSnapshot = snapshotStore.getSnapshotById(req.params.baseId);
+    const targetSnapshot = snapshotStore.getSnapshotById(req.params.targetId);
+    if (!baseSnapshot || !targetSnapshot) {
+      return res.status(404).json({ error: 'One or both snapshots were not found.' });
     }
 
-    const limit = Number(req.query.limit || 12);
-    const items = searchItems(q, Math.max(1, Math.min(limit, 30)));
-    return res.json({ items });
-  } catch (error) {
-    return res.status(500).json({ error: error.message || 'Failed to load items' });
-  }
+    return res.json({
+      baseSnapshot: snapshotStore.buildSnapshotSummary(baseSnapshot),
+      targetSnapshot: snapshotStore.buildSnapshotSummary(targetSnapshot),
+      comparison: snapshotStore.compareSnapshots(baseSnapshot, targetSnapshot),
+    });
+  });
+
+  app.get('/api/snapshots/:id', (req, res) => {
+    const snapshot = snapshotStore.getSnapshotById(req.params.id);
+    if (!snapshot) {
+      return res.status(404).json({ error: 'Snapshot not found.' });
+    }
+    return res.json(snapshot);
+  });
+
+  app.get('/healthz', (_req, res) => {
+    const telemetry = marketApi.getTelemetry();
+    res.json({
+      ok: true,
+      cacheLoaded: itemCache.items.length > 0,
+      cacheAgeMs: itemCache.loadedAt ? nowMs() - itemCache.loadedAt : null,
+      ...telemetry,
+      timestamp: now().toISOString(),
+    });
+  });
+
+  return app;
 }
 
-app.get('/api/items', handleItemsLookup);
-app.get('/api/items/search', handleItemsLookup);
-
-app.post('/api/analyze', async (req, res) => {
-  try {
-    await ensureItemsLoaded();
-
-    const body = req.body || {};
-    const rawItems = Array.isArray(body.items) ? body.items : [];
-
-    if (rawItems.length === 0) {
-      return res.status(400).json({ error: 'Please provide at least one item name or slug.' });
-    }
-
-    const { resolved, unresolved } = resolveItems(rawItems);
-    if (resolved.length === 0) {
-      return res.status(400).json({ error: 'No valid items were found.', unresolved });
-    }
-
-    const options = parseAnalysisOptions(body);
-    const { result, errors } = await analyzeResolvedItems(resolved, options);
-    const enrichedResult = enrichResultRowsWithSnapshotContext(result, options);
-    const payload = {
-      analyzedAt: new Date().toISOString(),
-      options,
-      requestedCount: rawItems.length,
-      resolvedCount: resolved.length,
-      unresolved,
-      result: enrichedResult,
-      errors,
-    };
-    const snapshot = createSnapshot('analyze', payload);
-    return res.json({
-      ...payload,
-      snapshotId: snapshot.id,
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message || 'Unknown server error' });
-  }
-});
-
-app.post('/api/auto-find', async (req, res) => {
-  try {
-    await ensureItemsLoaded();
-
-    const body = req.body || {};
-    const options = parseAnalysisOptions(body);
-    const maxResults = Number.isFinite(Number(body.maxResults))
-      ? Math.min(Math.max(Number(body.maxResults), 1), 100)
-      : 25;
-
-    const recentOrders = await marketApi.get('/orders/recent', {
-      platform: options.platform,
-      language: options.language,
-      crossplay: options.crossplay,
-    });
-
-    const candidates = getRecentCandidateItems(Array.isArray(recentOrders) ? recentOrders : [], options);
-    const analysisBudget = Math.min(candidates.length, Math.max(maxResults * 3, 30));
-    const selected = candidates.slice(0, analysisBudget).map((x) => x.item);
-    const { result, errors } = await analyzeResolvedItems(selected, options);
-    const enrichedResult = enrichResultRowsWithSnapshotContext(result, options);
-    const payload = {
-      analyzedAt: new Date().toISOString(),
-      options,
-      scannedCount: selected.length,
-      candidateCount: candidates.length,
-      analysisBudget,
-      result: enrichedResult.slice(0, maxResults),
-      errors,
-    };
-    const snapshot = createSnapshot('auto-find', payload);
-    return res.json({
-      ...payload,
-      snapshotId: snapshot.id,
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message || 'Unknown server error' });
-  }
-});
-
-app.get('/api/snapshots', (req, res) => {
-  const limit = Number(req.query.limit || 12);
-  return res.json({ snapshots: listSnapshotSummaries(limit) });
-});
-
-app.get('/api/snapshots/compare/:baseId/:targetId', (req, res) => {
-  const baseSnapshot = getSnapshotById(req.params.baseId);
-  const targetSnapshot = getSnapshotById(req.params.targetId);
-  if (!baseSnapshot || !targetSnapshot) {
-    return res.status(404).json({ error: 'One or both snapshots were not found.' });
-  }
-
-  return res.json({
-    baseSnapshot: buildSnapshotSummary(baseSnapshot),
-    targetSnapshot: buildSnapshotSummary(targetSnapshot),
-    comparison: compareSnapshots(baseSnapshot, targetSnapshot),
-  });
-});
-
-app.get('/api/snapshots/:id', (req, res) => {
-  const snapshot = getSnapshotById(req.params.id);
-  if (!snapshot) {
-    return res.status(404).json({ error: 'Snapshot not found.' });
-  }
-  return res.json(snapshot);
-});
-
-app.get('/healthz', (req, res) => {
-  const telemetry = marketApi.getTelemetry();
-  res.json({
-    ok: true,
-    cacheLoaded: itemCache.items.length > 0,
-    cacheAgeMs: itemCache.loadedAt ? Date.now() - itemCache.loadedAt : null,
-    ...telemetry,
-    timestamp: new Date().toISOString(),
-  });
-});
+const app = createApp();
 
 const port = Number(process.env.PORT || 3000);
 if (require.main === module) {
@@ -726,6 +752,7 @@ if (require.main === module) {
 
 module.exports = {
   app,
+  createApp,
   parseAnalysisOptions,
   analyzeSingleItem,
   getRecentCandidateItems,
