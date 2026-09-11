@@ -487,6 +487,7 @@ async function analyzeResolvedItems(marketApi, resolved, options) {
           code: error.code || 'ITEM_ANALYSIS_FAILED',
           status: Number.isInteger(error.status) ? error.status : undefined,
           attempts: Number.isInteger(error.attempts) ? error.attempts : undefined,
+          retryAfterMs: Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : undefined,
         },
       };
     }
@@ -612,6 +613,7 @@ function createApp(dependencies = {}) {
     };
     if (Number.isInteger(error?.status)) payload.upstreamStatus = error.status;
     if (Number.isInteger(error?.attempts)) payload.attempts = error.attempts;
+    if (Number.isFinite(error?.retryAfterMs)) payload.retryAfterMs = error.retryAfterMs;
     return res.status(isUpstreamFailure ? 502 : 500).json(payload);
   }
 

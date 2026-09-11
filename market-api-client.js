@@ -134,8 +134,21 @@ function createMarketApiClient(options = {}) {
     if (!response.ok) {
       const text = await response.text();
       if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < maxAttempts) {
-        state.retries += 1;
         const retryAfter = parseRetryAfter(response.headers?.get?.('retry-after'));
+        if (response.status === 429 && retryAfter !== null && retryAfter > maxRetryDelayMs) {
+          state.failures += 1;
+          throw makeApiError(
+            `Warframe Market rate limit requested a ${retryAfter}ms retry delay, above the configured ${maxRetryDelayMs}ms wait budget.`,
+            {
+              status: response.status,
+              code: 'MARKET_API_RATE_LIMITED',
+              attempts: attempt,
+              retryAfterMs: retryAfter,
+            }
+          );
+        }
+
+        state.retries += 1;
         const retryDelay = retryAfter ?? Math.min(250 * (2 ** (attempt - 1)), 2_000);
         await sleepImpl(Math.min(retryDelay, maxRetryDelayMs));
         return fetchAttempt(pathname, requestOptions, attempt + 1);

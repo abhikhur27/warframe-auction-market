@@ -32,7 +32,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Filters can now require minimum fallback profit so brittle top-of-book routes do not outrank routes with real backup depth.
 - Filters can require a minimum number of buy and sell offers so one-off spikes do not masquerade as liquid opportunities.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
-- The upstream client enforces a 12-second timeout, retries rate limits and transient 5xx responses, caps server-requested retry waits at five seconds, validates both the v2 envelope and collection payload shape, and exposes request/retry/failure counters through `/healthz`.
+- The upstream client enforces a 12-second timeout, retries rate limits and transient 5xx responses, honors `Retry-After` within a five-second wait budget, fails fast on longer rate-limit pauses, validates both the v2 envelope and collection payload shape, and exposes request/retry/failure counters through `/healthz`.
 - Sanitized Warframe Market v2 contract fixtures keep localized catalog aliases, ranked/subtype orders, catalog/recent/item routes, schema drift, malformed JSON, timeouts, rate limits, and upstream response errors reproducible without depending on live prices or network availability.
 - The offline contract runs through the complete Express analyze and auto-find routes, reads persisted snapshots back through HTTP, preserves failure codes and attempt counts on partial scans, and proves fatal upstream failures return `502` without archiving a misleading result.
 - GitHub Actions runs syntax checks and the full offline suite on Node 20 and Node 22.
@@ -155,7 +155,7 @@ The server intentionally throttles external calls:
 - per-request delay: `360ms`
 - request timeout: `12s`
 - maximum attempts for rate limits, network failures, and transient server errors: `3`
-- maximum delay before a retry: `5s`, even if `Retry-After` requests a longer pause
+- maximum accepted `Retry-After` delay: `5s`; longer rate-limit pauses fail explicitly instead of stalling or retrying early
 
 Health telemetry endpoint:
 

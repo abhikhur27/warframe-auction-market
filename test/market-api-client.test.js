@@ -123,7 +123,7 @@ test('retries rate-limited requests and exposes retry telemetry', async () => {
   assert.equal(telemetry.failures, 0);
 });
 
-test('caps Retry-After delays and reports an exhausted rate limit distinctly', async () => {
+test('fails fast when Retry-After exceeds the configured wait budget', async () => {
   const sleeps = [];
   const client = createMarketApiClient({
     requestDelayMs: 0,
@@ -141,14 +141,15 @@ test('caps Retry-After delays and reports an exhausted rate limit distinctly', a
     client.get('/items'),
     (error) => error.code === 'MARKET_API_RATE_LIMITED'
       && error.status === 429
-      && error.attempts === 2
+      && error.attempts === 1
+      && error.retryAfterMs === 120_000
   );
-  assert.deepEqual(sleeps, [25]);
+  assert.deepEqual(sleeps, []);
   assert.deepEqual(client.getTelemetry(), {
     activeRequests: 0,
     queueDepth: 0,
-    requests: 2,
-    retries: 1,
+    requests: 1,
+    retries: 0,
     failures: 1,
   });
 });

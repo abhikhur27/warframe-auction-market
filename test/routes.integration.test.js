@@ -240,8 +240,9 @@ test('an exhausted recent-order rate limit returns bounded retry metadata withou
   assert.equal(failed.response.status, 502);
   assert.equal(failed.body.code, 'MARKET_API_RATE_LIMITED');
   assert.equal(failed.body.upstreamStatus, 429);
-  assert.equal(failed.body.attempts, 2);
-  assert.deepEqual(sleeps, [5]);
+  assert.equal(failed.body.attempts, 1);
+  assert.equal(failed.body.retryAfterMs, 120_000);
+  assert.deepEqual(sleeps, []);
 
   const snapshots = await requestJson(baseUrl, '/api/snapshots');
   assert.deepEqual(snapshots.body.snapshots, []);
@@ -291,7 +292,7 @@ test('auto-find retries a bounded rate limit and archives malformed item JSON as
   const { baseUrl } = await startFixtureApp(t, {
     routes: {
       '/orders/item/arcane_energize': [
-        { status: 429, body: { error: 'slow down' }, headers: { 'retry-after': '60' } },
+        { status: 429, body: { error: 'slow down' }, headers: { 'retry-after': '0' } },
         'arcane-energize-orders.json',
       ],
       '/orders/item/adaptation': { invalidJson: true },
@@ -328,7 +329,7 @@ test('auto-find retries a bounded rate limit and archives malformed item JSON as
     code: 'MARKET_API_INVALID_JSON',
     attempts: 1,
   }]);
-  assert.deepEqual(sleeps, [5]);
+  assert.deepEqual(sleeps, [0]);
 
   const saved = await requestJson(baseUrl, `/api/snapshots/${body.snapshotId}`);
   assert.equal(saved.body.errors[0].code, 'MARKET_API_INVALID_JSON');
