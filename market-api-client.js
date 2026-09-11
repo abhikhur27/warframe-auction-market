@@ -5,6 +5,7 @@ const DEFAULT_REQUEST_DELAY_MS = 360;
 const DEFAULT_MAX_CONCURRENT_REQUESTS = 3;
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
+const DEFAULT_MAX_RETRY_DELAY_MS = 5_000;
 const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 
 function sleep(ms) {
@@ -53,6 +54,7 @@ function createMarketApiClient(options = {}) {
   const maxConcurrent = options.maxConcurrent ?? DEFAULT_MAX_CONCURRENT_REQUESTS;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxAttempts = options.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
 
   if (typeof fetchImpl !== 'function') {
     throw new TypeError('A fetch implementation is required.');
@@ -62,6 +64,9 @@ function createMarketApiClient(options = {}) {
   }
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
     throw new RangeError('maxAttempts must be a positive integer.');
+  }
+  if (!Number.isFinite(maxRetryDelayMs) || maxRetryDelayMs < 0) {
+    throw new RangeError('maxRetryDelayMs must be a non-negative number.');
   }
 
   const state = {
@@ -116,7 +121,11 @@ function createMarketApiClient(options = {}) {
       state.failures += 1;
       throw makeApiError(
         isAbort ? `Warframe Market request timed out after ${timeoutMs}ms.` : `Warframe Market request failed: ${error.message}`,
-        { code: isAbort ? 'MARKET_API_TIMEOUT' : 'MARKET_API_NETWORK', cause: error }
+        {
+          code: isAbort ? 'MARKET_API_TIMEOUT' : 'MARKET_API_NETWORK',
+          attempts: attempt,
+          cause: error,
+        }
       );
     } finally {
       if (timeout) clearTimeout(timeout);
@@ -127,14 +136,16 @@ function createMarketApiClient(options = {}) {
       if (RETRYABLE_STATUS_CODES.has(response.status) && attempt < maxAttempts) {
         state.retries += 1;
         const retryAfter = parseRetryAfter(response.headers?.get?.('retry-after'));
-        await sleepImpl(retryAfter ?? Math.min(250 * (2 ** (attempt - 1)), 2_000));
+        const retryDelay = retryAfter ?? Math.min(250 * (2 ** (attempt - 1)), 2_000);
+        await sleepImpl(Math.min(retryDelay, maxRetryDelayMs));
         return fetchAttempt(pathname, requestOptions, attempt + 1);
       }
 
       state.failures += 1;
       throw makeApiError(`Warframe Market API ${response.status}: ${text.slice(0, 200)}`, {
         status: response.status,
-        code: 'MARKET_API_HTTP',
+        code: response.status === 429 ? 'MARKET_API_RATE_LIMITED' : 'MARKET_API_HTTP',
+        attempts: attempt,
       });
     }
 
@@ -145,6 +156,7 @@ function createMarketApiClient(options = {}) {
       state.failures += 1;
       throw makeApiError('Warframe Market returned invalid JSON.', {
         code: 'MARKET_API_INVALID_JSON',
+        attempts: attempt,
         cause: error,
       });
     }
@@ -153,6 +165,7 @@ function createMarketApiClient(options = {}) {
       state.failures += 1;
       throw makeApiError(`Warframe Market API error: ${summarizeResponseError(body.error)}`, {
         code: 'MARKET_API_RESPONSE_ERROR',
+        attempts: attempt,
       });
     }
 
@@ -160,6 +173,7 @@ function createMarketApiClient(options = {}) {
       state.failures += 1;
       throw makeApiError('Warframe Market response is missing the data envelope.', {
         code: 'MARKET_API_INVALID_ENVELOPE',
+        attempts: attempt,
       });
     }
 
@@ -196,6 +210,7 @@ module.exports = {
   DEFAULT_API_BASE,
   DEFAULT_PLATFORM,
   DEFAULT_LANGUAGE,
+  DEFAULT_MAX_RETRY_DELAY_MS,
   createMarketApiClient,
   parseRetryAfter,
 };

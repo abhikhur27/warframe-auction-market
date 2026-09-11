@@ -22,11 +22,18 @@ function toBoolean(value, fallback = true) {
 }
 
 function normalizeItem(raw) {
-  const name = raw?.i18n?.en?.name || raw.slug;
+  const localizedNames = {};
+  for (const [language, translation] of Object.entries(raw?.i18n || {})) {
+    const translatedName = String(translation?.name || '').trim();
+    if (translatedName) localizedNames[language.toLowerCase()] = translatedName;
+  }
+
+  const name = localizedNames.en || Object.values(localizedNames)[0] || raw.slug;
   return {
     id: raw.id,
     slug: raw.slug,
     name,
+    localizedNames,
     tags: Array.isArray(raw.tags) ? raw.tags : [],
     maxRank: Number.isInteger(raw.maxRank) ? raw.maxRank : null,
     subtypes: Array.isArray(raw.subtypes) ? raw.subtypes : [],
@@ -50,7 +57,10 @@ async function ensureItemsLoaded(runtime, force = false) {
 
   for (const item of items) {
     bySlug.set(item.slug.toLowerCase(), item);
-    byName.set(item.name.toLowerCase(), item);
+    for (const localizedName of new Set([item.name, ...Object.values(item.localizedNames)])) {
+      const lookupName = localizedName.toLowerCase();
+      if (!byName.has(lookupName)) byName.set(lookupName, item);
+    }
     byId.set(item.id, item);
   }
 
@@ -73,19 +83,20 @@ function searchItems(itemCache, query, limit = 12) {
 
   for (const item of itemCache.items) {
     const slug = item.slug.toLowerCase();
-    const name = item.name.toLowerCase();
+    const names = new Set([item.name, ...Object.values(item.localizedNames || {})]
+      .map((name) => name.toLowerCase()));
 
-    if (slug === normalizedQuery || name === normalizedQuery) {
+    if (slug === normalizedQuery || names.has(normalizedQuery)) {
       exact.push(item);
       continue;
     }
 
-    if (slug.startsWith(normalizedQuery) || name.startsWith(normalizedQuery)) {
+    if (slug.startsWith(normalizedQuery) || [...names].some((name) => name.startsWith(normalizedQuery))) {
       startsWith.push(item);
       continue;
     }
 
-    if (slug.includes(normalizedQuery) || name.includes(normalizedQuery)) {
+    if (slug.includes(normalizedQuery) || [...names].some((name) => name.includes(normalizedQuery))) {
       contains.push(item);
     }
   }
@@ -474,6 +485,8 @@ async function analyzeResolvedItems(marketApi, resolved, options) {
           item: item.slug,
           error: error.message || 'Unknown error',
           code: error.code || 'ITEM_ANALYSIS_FAILED',
+          status: Number.isInteger(error.status) ? error.status : undefined,
+          attempts: Number.isInteger(error.attempts) ? error.attempts : undefined,
         },
       };
     }
@@ -593,10 +606,13 @@ function createApp(dependencies = {}) {
 
   function sendServerError(res, error, fallback = 'Unknown server error') {
     const isUpstreamFailure = String(error?.code || '').startsWith('MARKET_API_');
-    return res.status(isUpstreamFailure ? 502 : 500).json({
+    const payload = {
       error: error?.message || fallback,
       code: error?.code || 'SERVER_ERROR',
-    });
+    };
+    if (Number.isInteger(error?.status)) payload.upstreamStatus = error.status;
+    if (Number.isInteger(error?.attempts)) payload.attempts = error.attempts;
+    return res.status(isUpstreamFailure ? 502 : 500).json(payload);
   }
 
   app.get('/api/health', async (_req, res) => {

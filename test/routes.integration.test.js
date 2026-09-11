@@ -14,11 +14,14 @@ function readFixture(name) {
   return JSON.parse(fs.readFileSync(path.join(fixtureDir, name), 'utf8'));
 }
 
-function fixtureResponse(body, status = 200) {
+function fixtureResponse(body, status = 200, headers = {}) {
+  const normalizedHeaders = new Map(
+    Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)])
+  );
   return {
     ok: status >= 200 && status < 300,
     status,
-    headers: { get: () => null },
+    headers: { get: (name) => normalizedHeaders.get(name.toLowerCase()) || null },
     json: async () => body,
     text: async () => JSON.stringify(body),
   };
@@ -26,17 +29,44 @@ function fixtureResponse(body, status = 200) {
 
 function createFixtureFetch(requests, overrides = {}) {
   const fixtures = new Map([
-    ['/items', 'items.json'],
+    ['/items', overrides.items || 'items.json'],
     ['/orders/recent', overrides.recentOrders || 'recent-orders.json'],
     ['/orders/item/arcane_energize', 'arcane-energize-orders.json'],
     ['/orders/item/blind_rage', 'blind-rage-orders.json'],
     ['/orders/item/adaptation', 'invalid-collection.json'],
+    ['/orders/item/kuva_bramma_riven_mod', 'ranked-subtype-orders.json'],
   ]);
+  const attempts = new Map();
 
   return async (url, options) => {
     const pathname = new URL(url).pathname.replace('/v2', '');
+    const attempt = (attempts.get(pathname) || 0) + 1;
+    attempts.set(pathname, attempt);
     requests.push({ pathname, headers: options.headers });
-    const fixtureName = fixtures.get(pathname);
+    let route = overrides.routes?.[pathname] || fixtures.get(pathname);
+    if (Array.isArray(route)) route = route[Math.min(attempt - 1, route.length - 1)];
+
+    if (route?.abort) {
+      return new Promise((resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('Synthetic upstream timeout');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      });
+    }
+    if (route?.invalidJson) {
+      return {
+        ...fixtureResponse(null),
+        json: async () => { throw new SyntaxError('Synthetic malformed JSON'); },
+      };
+    }
+    if (route && typeof route === 'object') {
+      const body = route.fixture ? readFixture(route.fixture) : route.body;
+      return fixtureResponse(body, route.status || 200, route.headers || {});
+    }
+
+    const fixtureName = route;
     if (!fixtureName) return fixtureResponse({ error: 'Synthetic fixture not found' }, 404);
     return fixtureResponse(readFixture(fixtureName));
   };
@@ -49,6 +79,7 @@ async function startFixtureApp(t, overrides = {}) {
     fetchImpl: createFixtureFetch(requests, overrides),
     requestDelayMs: 0,
     maxAttempts: 1,
+    ...(overrides.marketApiOptions || {}),
   });
   const snapshotStore = createSnapshotStore({
     snapshotFile: path.join(root, 'session-snapshots.json'),
@@ -177,8 +208,173 @@ test('a fatal recent-order error returns 502 and does not archive a scan', async
 
   assert.equal(failed.response.status, 502);
   assert.equal(failed.body.code, 'MARKET_API_RESPONSE_ERROR');
+  assert.equal(failed.body.attempts, 1);
   assert.match(failed.body.error, /fixture_maintenance/);
 
   const snapshots = await requestJson(baseUrl, '/api/snapshots');
   assert.deepEqual(snapshots.body.snapshots, []);
+});
+
+test('an exhausted recent-order rate limit returns bounded retry metadata without a snapshot', async (t) => {
+  const sleeps = [];
+  const { baseUrl } = await startFixtureApp(t, {
+    routes: {
+      '/orders/recent': {
+        status: 429,
+        body: { error: 'synthetic rate limit' },
+        headers: { 'retry-after': '120' },
+      },
+    },
+    marketApiOptions: {
+      maxAttempts: 2,
+      maxRetryDelayMs: 5,
+      sleepImpl: async (ms) => sleeps.push(ms),
+    },
+  });
+  const failed = await requestJson(baseUrl, '/api/auto-find', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ maxAgeHours: 0 }),
+  });
+
+  assert.equal(failed.response.status, 502);
+  assert.equal(failed.body.code, 'MARKET_API_RATE_LIMITED');
+  assert.equal(failed.body.upstreamStatus, 429);
+  assert.equal(failed.body.attempts, 2);
+  assert.deepEqual(sleeps, [5]);
+
+  const snapshots = await requestJson(baseUrl, '/api/snapshots');
+  assert.deepEqual(snapshots.body.snapshots, []);
+});
+
+test('localized catalog aliases resolve ranked subtype routes without merging variants', async (t) => {
+  const { baseUrl, requests } = await startFixtureApp(t, { items: 'localized-items.json' });
+  const { response, body } = await requestJson(baseUrl, '/api/analyze', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      items: ['Mod Riven Kuva Bramma'],
+      platform: 'pc',
+      language: 'fr',
+      crossplay: true,
+      minSpread: 10,
+      minRoiPct: 10,
+      minExpectedProfit: 20,
+      minConservativeProfit: 20,
+      minLiquidityOffers: 2,
+      maxAgeHours: 0,
+    }),
+  });
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.equal(body.resolvedCount, 1);
+  assert.equal(body.result.length, 1);
+  assert.equal(body.result[0].item.slug, 'kuva_bramma_riven_mod');
+  assert.deepEqual(body.result[0].variant, {
+    rank: 8,
+    subtype: 'rolled',
+    label: 'Rank 8 | Subtype rolled',
+  });
+  assert.equal(body.result[0].expectedProfit, 80);
+  assert.equal(body.result[0].stressTest.conservativeExpectedProfit, 60);
+
+  const itemRequest = requests.find((request) => request.pathname.includes('kuva_bramma'));
+  assert.deepEqual(itemRequest.headers, {
+    platform: 'pc',
+    language: 'fr',
+    crossplay: 'true',
+  });
+});
+
+test('auto-find retries a bounded rate limit and archives malformed item JSON as a partial failure', async (t) => {
+  const sleeps = [];
+  const { baseUrl } = await startFixtureApp(t, {
+    routes: {
+      '/orders/item/arcane_energize': [
+        { status: 429, body: { error: 'slow down' }, headers: { 'retry-after': '60' } },
+        'arcane-energize-orders.json',
+      ],
+      '/orders/item/adaptation': { invalidJson: true },
+    },
+    marketApiOptions: {
+      maxAttempts: 2,
+      maxRetryDelayMs: 5,
+      sleepImpl: async (ms) => sleeps.push(ms),
+    },
+  });
+  const { response, body } = await requestJson(baseUrl, '/api/auto-find', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      minReputation: 5,
+      minSpread: 1,
+      minRoiPct: 0,
+      minExpectedProfit: 5,
+      minConservativeProfit: 0,
+      minLiquidityOffers: 1,
+      maxAgeHours: 0,
+      maxResults: 3,
+    }),
+  });
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(body.result.map((route) => route.item.slug), [
+    'arcane_energize',
+    'blind_rage',
+  ]);
+  assert.deepEqual(body.errors, [{
+    item: 'adaptation',
+    error: 'Warframe Market returned invalid JSON.',
+    code: 'MARKET_API_INVALID_JSON',
+    attempts: 1,
+  }]);
+  assert.deepEqual(sleeps, [5]);
+
+  const saved = await requestJson(baseUrl, `/api/snapshots/${body.snapshotId}`);
+  assert.equal(saved.body.errors[0].code, 'MARKET_API_INVALID_JSON');
+  const health = await requestJson(baseUrl, '/healthz');
+  assert.equal(health.body.requests, 6);
+  assert.equal(health.body.retries, 1);
+  assert.equal(health.body.failures, 1);
+});
+
+test('analyze retries item timeouts, returns attempt metadata, and preserves successful routes', async (t) => {
+  const { baseUrl } = await startFixtureApp(t, {
+    routes: {
+      '/orders/item/adaptation': { abort: true },
+    },
+    marketApiOptions: {
+      maxAttempts: 2,
+      timeoutMs: 10,
+      sleepImpl: async () => {},
+    },
+  });
+  const { response, body } = await requestJson(baseUrl, '/api/analyze', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      items: ['arcane energize', 'adaptation'],
+      minSpread: 1,
+      minRoiPct: 0,
+      minExpectedProfit: 1,
+      minConservativeProfit: 0,
+      minLiquidityOffers: 1,
+      maxAgeHours: 0,
+    }),
+  });
+
+  assert.equal(response.status, 200, JSON.stringify(body));
+  assert.deepEqual(body.result.map((route) => route.item.slug), ['arcane_energize']);
+  assert.deepEqual(body.errors, [{
+    item: 'adaptation',
+    error: 'Warframe Market request timed out after 10ms.',
+    code: 'MARKET_API_TIMEOUT',
+    attempts: 2,
+  }]);
+  assert.ok(body.snapshotId);
+
+  const health = await requestJson(baseUrl, '/healthz');
+  assert.equal(health.body.requests, 4);
+  assert.equal(health.body.retries, 1);
+  assert.equal(health.body.failures, 1);
 });

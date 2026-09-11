@@ -1,0 +1,19 @@
+{
+  "apiVersion": "2.0",
+  "data": [
+    {
+      "id": "riven-item-id",
+      "slug": "kuva_bramma_riven_mod",
+      "gameRef": "/Lotus/Upgrades/Mods/Randomized/LotusBowRandomModRare",
+      "tags": ["riven", "bow"],
+      "maxRank": 8,
+      "subtypes": ["rolled", "unrolled"],
+      "i18n": {
+        "en": { "name": "Kuva Bramma Riven Mod" },
+        "fr": { "name": "Mod Riven Kuva Bramma" },
+        "de": { "name": "Kuva-Bramma-Riven-Mod" }
+      }
+    }
+  ],
+  "error": null
+}

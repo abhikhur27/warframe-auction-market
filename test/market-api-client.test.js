@@ -123,6 +123,59 @@ test('retries rate-limited requests and exposes retry telemetry', async () => {
   assert.equal(telemetry.failures, 0);
 });
 
+test('caps Retry-After delays and reports an exhausted rate limit distinctly', async () => {
+  const sleeps = [];
+  const client = createMarketApiClient({
+    requestDelayMs: 0,
+    maxAttempts: 2,
+    maxRetryDelayMs: 25,
+    sleepImpl: async (ms) => sleeps.push(ms),
+    fetchImpl: async () => response(
+      { error: 'synthetic rate limit' },
+      429,
+      { 'retry-after': '120' }
+    ),
+  });
+
+  await assert.rejects(
+    client.get('/items'),
+    (error) => error.code === 'MARKET_API_RATE_LIMITED'
+      && error.status === 429
+      && error.attempts === 2
+  );
+  assert.deepEqual(sleeps, [25]);
+  assert.deepEqual(client.getTelemetry(), {
+    activeRequests: 0,
+    queueDepth: 0,
+    requests: 2,
+    retries: 1,
+    failures: 1,
+  });
+});
+
+test('classifies malformed JSON without retrying a successful HTTP response', async () => {
+  const client = createMarketApiClient({
+    requestDelayMs: 0,
+    maxAttempts: 3,
+    fetchImpl: async () => ({
+      ...response(null),
+      json: async () => { throw new SyntaxError('Synthetic malformed JSON'); },
+    }),
+  });
+
+  await assert.rejects(
+    client.get('/orders/item/example'),
+    (error) => error.code === 'MARKET_API_INVALID_JSON' && error.attempts === 1
+  );
+  assert.deepEqual(client.getTelemetry(), {
+    activeRequests: 0,
+    queueDepth: 0,
+    requests: 1,
+    retries: 0,
+    failures: 1,
+  });
+});
+
 test('rejects a successful response when the upstream data envelope drifts', async () => {
   const client = createMarketApiClient({
     requestDelayMs: 0,
