@@ -87,7 +87,7 @@ async function startFixtureApp(t, overrides = {}) {
   const app = createApp({
     marketApi,
     snapshotStore,
-    now: () => new Date('2026-09-06T22:00:00.000Z'),
+    now: overrides.now || (() => new Date('2026-09-06T22:00:00.000Z')),
   });
   const server = await new Promise((resolve) => {
     const listener = app.listen(0, '127.0.0.1', () => resolve(listener));
@@ -148,6 +148,44 @@ test('POST /api/analyze replays the external contract through snapshot read-back
     '/items',
     '/orders/item/arcane_energize',
   ]);
+});
+
+test('stale item catalog remains available through a bounded refresh outage', async (t) => {
+  let clock = new Date('2026-09-06T22:00:00.000Z');
+  const { baseUrl, requests } = await startFixtureApp(t, {
+    now: () => clock,
+    routes: {
+      '/items': [
+        'items.json',
+        { status: 503, body: { error: 'synthetic catalog outage' } },
+      ],
+    },
+  });
+
+  const warm = await requestJson(baseUrl, '/api/items?q=arcane');
+  assert.equal(warm.response.status, 200);
+  assert.equal(warm.body.items[0].slug, 'arcane_energize');
+
+  clock = new Date(clock.getTime() + (6 * 60 * 60 * 1000) + 1);
+  const fallback = await requestJson(baseUrl, '/api/items?q=arcane');
+  assert.equal(fallback.response.status, 200);
+  assert.equal(fallback.body.items[0].slug, 'arcane_energize');
+
+  const health = await requestJson(baseUrl, '/healthz');
+  assert.equal(health.body.cacheLoaded, true);
+  assert.equal(health.body.cacheStale, true);
+  assert.deepEqual(health.body.cacheRefresh, {
+    status: 'stale',
+    lastAttemptAt: clock.getTime(),
+    lastSuccessAt: new Date('2026-09-06T22:00:00.000Z').getTime(),
+    lastFailureAt: clock.getTime(),
+    lastFailureCode: 'MARKET_API_HTTP',
+    retryInMs: 60_000,
+  });
+  assert.equal(requests.filter((request) => request.pathname === '/items').length, 2);
+
+  await requestJson(baseUrl, '/api/items?q=blind');
+  assert.equal(requests.filter((request) => request.pathname === '/items').length, 2);
 });
 
 test('POST /api/auto-find returns viable routes and records item-level schema failures', async (t) => {

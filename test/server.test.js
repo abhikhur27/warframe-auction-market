@@ -9,6 +9,9 @@ const {
   analyzeSingleItem,
   getRecentCandidateItems,
   buildStressTest,
+  ensureItemsLoaded,
+  CACHE_TTL_MS,
+  CACHE_REFRESH_BACKOFF_MS,
 } = require('../server');
 const {
   createSnapshotStore,
@@ -28,6 +31,35 @@ function createTestSnapshotStore(t) {
   return createSnapshotStore({
     snapshotFile: path.join(root, 'session-snapshots.json'),
   });
+}
+
+function createItemRuntime(marketApi, nowMs) {
+  return {
+    marketApi,
+    nowMs,
+    itemLoadPromise: null,
+    itemCache: {
+      loadedAt: 0,
+      lastAttemptAt: 0,
+      lastSuccessAt: 0,
+      lastFailureAt: 0,
+      lastFailureCode: null,
+      lastFailureError: null,
+      items: [],
+      bySlug: new Map(),
+      byName: new Map(),
+      byId: new Map(),
+    },
+  };
+}
+
+function catalogItem(id, slug, name) {
+  return {
+    id,
+    slug,
+    i18n: { en: { name } },
+    tags: ['mod'],
+  };
 }
 
 test('parseAnalysisOptions clamps and normalizes incoming values', () => {
@@ -50,6 +82,87 @@ test('parseAnalysisOptions clamps and normalizes incoming values', () => {
   assert.equal(options.minLiquidityOffers, 12);
   assert.equal(options.buyerOptionCount, 1);
   assert.equal(options.sellerOptionCount, 0);
+});
+
+test('item catalog refresh is single-flight across concurrent cold requests', async () => {
+  let calls = 0;
+  let release;
+  const catalog = new Promise((resolve) => { release = resolve; });
+  const runtime = createItemRuntime({
+    getCollection: async () => {
+      calls += 1;
+      return catalog;
+    },
+  }, () => 1_000);
+
+  const first = ensureItemsLoaded(runtime);
+  const second = ensureItemsLoaded(runtime);
+  assert.equal(calls, 1);
+
+  release([catalogItem('item-1', 'arcane_energize', 'Arcane Energize')]);
+  const [firstItems, secondItems] = await Promise.all([first, second]);
+  assert.strictEqual(firstItems, secondItems);
+  assert.equal(firstItems.length, 1);
+  assert.equal(runtime.itemCache.byName.get('arcane energize').slug, 'arcane_energize');
+});
+
+test('stale item catalog survives refresh failure and observes retry backoff', async () => {
+  let clock = 10_000;
+  let calls = 0;
+  const responses = [
+    [catalogItem('item-1', 'arcane_energize', 'Arcane Energize')],
+    Object.assign(new Error('synthetic outage'), { code: 'MARKET_API_NETWORK' }),
+    [catalogItem('item-2', 'blind_rage', 'Blind Rage')],
+  ];
+  const runtime = createItemRuntime({
+    getCollection: async () => {
+      const response = responses[calls];
+      calls += 1;
+      if (response instanceof Error) throw response;
+      return response;
+    },
+  }, () => clock);
+
+  await ensureItemsLoaded(runtime);
+  clock += CACHE_TTL_MS + 1;
+  const staleItems = await ensureItemsLoaded(runtime);
+  assert.equal(staleItems[0].slug, 'arcane_energize');
+  assert.equal(runtime.itemCache.lastFailureCode, 'MARKET_API_NETWORK');
+  assert.equal(calls, 2);
+
+  clock += CACHE_REFRESH_BACKOFF_MS - 1;
+  const backedOffItems = await ensureItemsLoaded(runtime);
+  assert.equal(backedOffItems[0].slug, 'arcane_energize');
+  assert.equal(calls, 2);
+
+  clock += 2;
+  const refreshedItems = await ensureItemsLoaded(runtime);
+  assert.equal(refreshedItems[0].slug, 'blind_rage');
+  assert.equal(runtime.itemCache.lastFailureCode, null);
+  assert.equal(calls, 3);
+});
+
+test('cold item catalog load rejects empty upstream data', async () => {
+  let calls = 0;
+  const runtime = createItemRuntime({
+    getCollection: async () => {
+      calls += 1;
+      return [];
+    },
+  }, () => 1_000);
+
+  await assert.rejects(
+    ensureItemsLoaded(runtime),
+    (error) => error.code === 'MARKET_API_EMPTY_CATALOG'
+  );
+  assert.equal(runtime.itemCache.items.length, 0);
+  assert.equal(runtime.itemCache.lastFailureCode, 'MARKET_API_EMPTY_CATALOG');
+
+  await assert.rejects(
+    ensureItemsLoaded(runtime),
+    (error) => error.code === 'MARKET_API_EMPTY_CATALOG'
+  );
+  assert.equal(calls, 1);
 });
 
 test('analyzeSingleItem returns the best viable route and filters stale or weak offers', () => {

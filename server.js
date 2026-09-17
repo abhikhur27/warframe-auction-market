@@ -11,6 +11,7 @@ const {
 const defaultSnapshotStore = require('./snapshot-store');
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6;
+const CACHE_REFRESH_BACKOFF_MS = 1000 * 60;
 
 function toBoolean(value, fallback = true) {
   if (typeof value === 'boolean') return value;
@@ -47,30 +48,78 @@ async function ensureItemsLoaded(runtime, force = false) {
     return itemCache.items;
   }
 
-  const rawItems = await marketApi.getCollection('/items');
-  const items = rawItems.map(normalizeItem);
-  items.sort((a, b) => a.name.localeCompare(b.name));
-
-  const bySlug = new Map();
-  const byName = new Map();
-  const byId = new Map();
-
-  for (const item of items) {
-    bySlug.set(item.slug.toLowerCase(), item);
-    for (const localizedName of new Set([item.name, ...Object.values(item.localizedNames)])) {
-      const lookupName = localizedName.toLowerCase();
-      if (!byName.has(lookupName)) byName.set(lookupName, item);
-    }
-    byId.set(item.id, item);
+  const refreshBackoffActive = itemCache.lastFailureAt
+    && nowMs() - itemCache.lastFailureAt < CACHE_REFRESH_BACKOFF_MS;
+  if (!force && refreshBackoffActive) {
+    if (itemCache.items.length > 0) return itemCache.items;
+    if (itemCache.lastFailureError) throw itemCache.lastFailureError;
   }
 
-  itemCache.items = items;
-  itemCache.bySlug = bySlug;
-  itemCache.byName = byName;
-  itemCache.byId = byId;
-  itemCache.loadedAt = nowMs();
+  if (!runtime.itemLoadPromise) {
+    runtime.itemLoadPromise = (async () => {
+      itemCache.lastAttemptAt = nowMs();
+      try {
+        const rawItems = await marketApi.getCollection('/items');
+        if (rawItems.length === 0) {
+          const error = new Error('Warframe Market returned an empty item catalog.');
+          error.code = 'MARKET_API_EMPTY_CATALOG';
+          throw error;
+        }
 
-  return items;
+        const items = rawItems.map(normalizeItem);
+        const invalidItem = items.find((item) => (
+          !item.id || typeof item.slug !== 'string' || !item.slug.trim() || !item.name
+        ));
+        if (invalidItem) {
+          const error = new Error('Warframe Market item catalog contains an invalid item record.');
+          error.code = 'MARKET_API_INVALID_CATALOG_ITEM';
+          throw error;
+        }
+        items.sort((a, b) => a.name.localeCompare(b.name));
+
+        const bySlug = new Map();
+        const byName = new Map();
+        const byId = new Map();
+
+        for (const item of items) {
+          bySlug.set(item.slug.toLowerCase(), item);
+          for (const localizedName of new Set([item.name, ...Object.values(item.localizedNames)])) {
+            const lookupName = localizedName.toLowerCase();
+            if (!byName.has(lookupName)) byName.set(lookupName, item);
+          }
+          byId.set(item.id, item);
+        }
+
+        itemCache.items = items;
+        itemCache.bySlug = bySlug;
+        itemCache.byName = byName;
+        itemCache.byId = byId;
+        itemCache.loadedAt = nowMs();
+        itemCache.lastSuccessAt = itemCache.loadedAt;
+        itemCache.lastFailureAt = 0;
+        itemCache.lastFailureCode = null;
+        itemCache.lastFailureError = null;
+
+        return items;
+      } catch (error) {
+        itemCache.lastFailureAt = nowMs();
+        itemCache.lastFailureCode = error?.code || 'UNKNOWN';
+        itemCache.lastFailureError = error;
+        throw error;
+      } finally {
+        runtime.itemLoadPromise = null;
+      }
+    })();
+  }
+
+  try {
+    return await runtime.itemLoadPromise;
+  } catch (error) {
+    if (itemCache.items.length > 0) {
+      return itemCache.items;
+    }
+    throw error;
+  }
 }
 
 function searchItems(itemCache, query, limit = 12) {
@@ -594,12 +643,17 @@ function createApp(dependencies = {}) {
   const nowMs = () => now().getTime();
   const itemCache = {
     loadedAt: 0,
+    lastAttemptAt: 0,
+    lastSuccessAt: 0,
+    lastFailureAt: 0,
+    lastFailureCode: null,
+    lastFailureError: null,
     items: [],
     bySlug: new Map(),
     byName: new Map(),
     byId: new Map(),
   };
-  const runtime = { marketApi, itemCache, nowMs };
+  const runtime = { marketApi, itemCache, itemLoadPromise: null, nowMs };
   const app = express();
 
   app.use(express.json({ limit: '1mb' }));
@@ -747,10 +801,24 @@ function createApp(dependencies = {}) {
 
   app.get('/healthz', (_req, res) => {
     const telemetry = marketApi.getTelemetry();
+    const cacheAgeMs = itemCache.loadedAt ? nowMs() - itemCache.loadedAt : null;
+    const cacheStale = cacheAgeMs !== null && cacheAgeMs > CACHE_TTL_MS;
+    const retryInMs = itemCache.lastFailureAt
+      ? Math.max(0, CACHE_REFRESH_BACKOFF_MS - (nowMs() - itemCache.lastFailureAt))
+      : 0;
     res.json({
       ok: true,
       cacheLoaded: itemCache.items.length > 0,
-      cacheAgeMs: itemCache.loadedAt ? nowMs() - itemCache.loadedAt : null,
+      cacheAgeMs,
+      cacheStale,
+      cacheRefresh: {
+        status: !itemCache.items.length ? 'empty' : (cacheStale ? 'stale' : 'fresh'),
+        lastAttemptAt: itemCache.lastAttemptAt || null,
+        lastSuccessAt: itemCache.lastSuccessAt || null,
+        lastFailureAt: itemCache.lastFailureAt || null,
+        lastFailureCode: itemCache.lastFailureCode,
+        retryInMs,
+      },
       ...telemetry,
       timestamp: now().toISOString(),
     });
@@ -779,5 +847,8 @@ module.exports = {
   formatVariantLabel,
   getHighOutlierFence,
   normalizeItem,
+  ensureItemsLoaded,
+  CACHE_TTL_MS,
+  CACHE_REFRESH_BACKOFF_MS,
   compareSnapshots,
 };

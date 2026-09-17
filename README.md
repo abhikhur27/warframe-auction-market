@@ -33,6 +33,7 @@ This project is designed for **decision support** during manual trading, not ful
 - Filters can require a minimum number of buy and sell offers so one-off spikes do not masquerade as liquid opportunities.
 - Copies a top-opportunity brief for faster whisper routing outside the app.
 - The upstream client enforces a 12-second timeout, retries rate limits and transient 5xx responses, honors `Retry-After` within a five-second wait budget, fails fast on longer rate-limit pauses, validates both the v2 envelope and collection payload shape, and exposes request/retry/failure counters through `/healthz`.
+- Item-catalog refreshes are single-flight, preserve the last good catalog through transient upstream failures, and back off for one minute before retrying so a stale six-hour catalog remains searchable without creating a request storm.
 - Sanitized Warframe Market v2 contract fixtures keep localized catalog aliases, ranked/subtype orders, catalog/recent/item routes, schema drift, malformed JSON, timeouts, rate limits, and upstream response errors reproducible without depending on live prices or network availability.
 - The offline contract runs through the complete Express analyze and auto-find routes, reads persisted snapshots back through HTTP, preserves failure codes and attempt counts on partial scans, and proves fatal upstream failures return `502` without archiving a misleading result.
 - GitHub Actions runs syntax checks and the full offline suite on Node 20 and Node 22.
@@ -159,7 +160,9 @@ The server intentionally throttles external calls:
 
 Health telemetry endpoint:
 
-- `GET /healthz` returns cache state, queue depth, active request count, and server timestamp.
+- `GET /healthz` returns cache age/staleness, the last catalog refresh outcome and retry delay, queue depth, active request count, request/retry/failure counters, and server timestamp.
+
+The first catalog load still fails explicitly if upstream data is empty or malformed. After one valid catalog has loaded, a failed refresh serves that known-good in-memory copy and reports `cacheRefresh.status: "stale"` until the next bounded retry succeeds.
 
 This lowers API pressure and reduces burst failures while scanning many items.
 
